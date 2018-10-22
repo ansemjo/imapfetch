@@ -11,6 +11,8 @@ logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
 
 class Mailserver:
+    FIRSTCHUNK = 64 * 1024
+    NEXTCHUNK = 1024 * 1024
 
     # open connection
     def __init__(self, server, username, password):
@@ -28,7 +30,7 @@ class Mailserver:
 
     # get new mails, starting with uidstart
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-    def newmails(self, uidstart=1):
+    def mails(self, uidstart=1):
         # search for and iterate over message uids
         uids = self.connection.uid("search", None, f"UID {uidstart}:*")[1]
         for msg in uids[0].split():
@@ -36,30 +38,20 @@ class Mailserver:
             if int(msg) > uidstart:
                 # fetch message body
                 log.info(f"fetch mail uid {msg}")
-                yield ImapMail(self, msg)
+                yield self.generator(msg)
 
-    # fetch email header
-    def header(self, uid):
-        data = self.connection.uid("fetch", uid, "(RFC822.HEADER)")[1]
-        return data[0][1]
-
-    def fullbody(self, uid):
-        data = self.connection.uid("fetch", uid, "(RFC822)")[1]
-        return data[0][1]
-
-
-class ImapMail:
-    def __init__(self, mailserv: Mailserver, uid):
-        self._server = mailserv
-        self.uid = uid
-        self.header = self._server.header(self.uid)
-        self.digest = digest(self.header)
-        self._full = None
-
-    def full(self):
-        if self._full is None:
-            self._full = self._server.fullbody(self.uid)
-        return self._full
+    # partial generator for a single mail
+    def generator(self, uid):
+        offset = 1
+        chunksize = self.FIRSTCHUNK
+        while True:
+            log.debug(f"UID PARTIAL {uid} RFC822 offset={offset} size={chunksize}")
+            wrap, data = self.connection.uid("partial", uid, "RFC822", str(offset), str(chunksize))[1][0]
+            yield data
+            if int(re.sub(r".*RFC822 {(\d+)}$", r"\1", wrap.decode())) < chunksize:
+                return
+            chunksize = self.NEXTCHUNK
+            offset += chunksize
 
 
 class Maildir:
@@ -103,6 +95,7 @@ if __name__ == "__main__":
 
     import configparser
     import dbm
+    import email
 
     conf = configparser.ConfigParser()
     conf.read("settings.conf")
@@ -123,13 +116,31 @@ if __name__ == "__main__":
 
         for folder in server.ls():
             log.info(f"process folder {folder}")
+
             server.cd(folder)
-            for mail in server.newmails():
-                if mail.digest not in db:
-                    key = mbox.store(mail.full(), folder)
-                    db[mail.digest] = folder + "/" + key
+            for mailgen in server.mails():
+
+                # get header chunk
+                message = next(mailgen)
+                while not (b"\r\n\r\n" in message or b"\n\n" in message):
+                    message += next(mailgen)
+
+                # get digest of header only
+                e = email.message_from_bytes(message)
+                e.set_payload("")
+                dgst = digest(e.as_bytes())
+
+                # mail already exists?
+                if dgst in db:
+                    log.debug("message exists already")
+
                 else:
-                    print(f"message exists already")
+                    # assemble full message
+                    for part in mailgen:
+                        message += part
+                    # save in local mailbox
+                    key = mbox.store(message, folder)
+                    db[dgst] = folder + "/" + key
 
         db.close()
         server.connection.close()
