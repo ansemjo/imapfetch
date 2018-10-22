@@ -33,15 +33,14 @@ class Mailserver:
     def mails(self, uidstart=1):
         # search for and iterate over message uids
         uids = self.connection.uid("search", None, f"UID {uidstart}:*")[1]
-        for msg in uids[0].split():
+        for uid in uids[0].split():
             # search always returns at least one result
-            if int(msg) > uidstart:
+            if int(uid) > uidstart:
                 # fetch message body
-                log.info(f"fetch mail uid {msg}")
-                yield self.generator(msg)
+                yield uid
 
     # partial generator for a single mail
-    def generator(self, uid):
+    def partials(self, uid):
         offset = 1
         chunksize = self.FIRSTCHUNK
         while True:
@@ -74,10 +73,30 @@ class Maildir:
 class Account:
     # parse account data from configuration section
     def __init__(self, section):
-        self.archive = joinpath(".", section.get("archive"))
-        self.server = section.get("server")
-        self.username = section.get("username")
-        self.password = section.get("password")
+        self._archive = joinpath(".", section.get("archive"))
+        self._index = joinpath(self._archive, "index")
+        self.incremental = section.getboolean("incremental")
+        self._server = section.get("server")
+        self._username = section.get("username")
+        self._password = section.get("password")
+
+    def __enter__(self):
+        
+        log.debug(f"connect to {self._server} as {self._username}")
+        self.server = Mailserver(self._server, self._username, self._password)
+        
+        log.debug(f"open archive in {self._archive}")
+        self.archive = Maildir(self._archive)
+
+        log.debug(f"open index in {self._index}")
+        self.index = dbm.open(self._index, flag="c")
+
+        return self, self.server, self.archive, self.index
+
+    def __exit__(self, type, value, traceback):
+        self.index.close()
+        self.server.connection.close()
+        self.server.connection.logout()
 
 
 # hash message header for indexing
@@ -99,48 +118,41 @@ if __name__ == "__main__":
 
     conf = configparser.ConfigParser()
     conf.read("settings.conf")
-    settings = conf["imapfetch"]
 
-    for section in [s for s in conf.sections() if s != "imapfetch"]:
-        acc = Account(conf[section])
+    for section in conf.sections():
+        with Account(conf[section]) as (acc, server, archive, index):
 
-        log.debug(f"open maildir in {acc.archive}")
-        mbox = Maildir(acc.archive)
+            for folder in server.ls():
+                log.info(f"process folder {folder}")
 
-        log.debug(f"connect to {acc.server}")
-        server = Mailserver(acc.server, acc.username, acc.password)
+                server.cd(folder)
+                highest = int(index.get(folder, 1))
 
-        db = joinpath(acc.archive, "index")
-        log.debug(f"open index at {db}")
-        db = dbm.open(db, flag="c")
+                for uid in server.mails(highest if acc.incremental else 1):
+                    partials = server.partials(uid)
 
-        for folder in server.ls():
-            log.info(f"process folder {folder}")
+                    # get header chunk
+                    message = next(partials)
+                    while not (b"\r\n\r\n" in message or b"\n\n" in message):
+                        message += next(partials)
 
-            server.cd(folder)
-            for mailgen in server.mails():
+                    # get digest of header only
+                    e = email.message_from_bytes(message)
+                    e.set_payload("")
+                    dgst = digest(e.as_bytes())
+                    log.info(e.get('Date'))
 
-                # get header chunk
-                message = next(mailgen)
-                while not (b"\r\n\r\n" in message or b"\n\n" in message):
-                    message += next(mailgen)
+                    # mail already exists?
+                    if dgst in index:
+                        log.debug("message exists already")
 
-                # get digest of header only
-                e = email.message_from_bytes(message)
-                e.set_payload("")
-                dgst = digest(e.as_bytes())
-
-                # mail already exists?
-                if dgst in db:
-                    log.debug("message exists already")
-
-                else:
-                    # assemble full message
-                    for part in mailgen:
-                        message += part
-                    # save in local mailbox
-                    key = mbox.store(message, folder)
-                    db[dgst] = folder + "/" + key
-
-        db.close()
-        server.connection.close()
+                    else:
+                        # assemble full message
+                        for part in partials:
+                            message += part
+                        # save in local mailbox
+                        key = archive.store(message)
+                        index[dgst] = folder + "/" + key
+                        # save highest uid
+                        if int(uid) > highest:
+                            index[folder] = uid
