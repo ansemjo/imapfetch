@@ -10,13 +10,6 @@ import re
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
 
-# raise errors if returned status is not OK
-def assertok(obj, message=None):
-    if obj[0] != "OK":
-        raise ValueError(message if message is not None else obj[0])
-    return obj[1]
-
-
 class Mailserver:
 
     # open connection
@@ -26,7 +19,7 @@ class Mailserver:
 
     # list available folders
     def ls(self):
-        folders = assertok(self.connection.list(), "failure getting folder list")
+        folders = self.connection.list()[1]
         return (re.sub(r"^\([^)]+\)\s\".\"\s", "", f.decode()) for f in folders)
 
     # "change directory"
@@ -37,8 +30,7 @@ class Mailserver:
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
     def newmails(self, uidstart=1):
         # search for and iterate over message uids
-        res = self.connection.uid("search", None, f"UID {uidstart}:*")
-        uids = assertok(res, "failure while fetching new mail uids")
+        uids = self.connection.uid("search", None, f"UID {uidstart}:*")[1]
         for msg in uids[0].split():
             # search always returns at least one result
             if int(msg) > uidstart:
@@ -48,13 +40,11 @@ class Mailserver:
 
     # fetch email header
     def header(self, uid):
-        res = self.connection.uid("fetch", uid, "(RFC822.HEADER)")
-        data = assertok(res, f"failed fetching uid {uid} head")
+        data = self.connection.uid("fetch", uid, "(RFC822.HEADER)")[1]
         return data[0][1]
 
     def fullbody(self, uid):
-        res = self.connection.uid("fetch", uid, "(RFC822)")
-        data = assertok(res, f"failed fetching uid {uid} mail")
+        data = self.connection.uid("fetch", uid, "(RFC822)")[1]
         return data[0][1]
 
 
