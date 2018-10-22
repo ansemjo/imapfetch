@@ -17,7 +17,7 @@ def assertok(obj, message=None):
     return obj[1]
 
 
-class IMAP4Server:
+class Mailserver:
 
     # open connection
     def __init__(self, server, username, password):
@@ -29,11 +29,13 @@ class IMAP4Server:
         folders = assertok(self.connection.list(), "failure getting folder list")
         return (re.sub(r"^\([^)]+\)\s\".\"\s", "", f.decode()) for f in folders)
 
+    # "change directory"
+    def cd(self, folder):
+        self.connection.select(folder, readonly=True)
+
     # get new mails, starting with uidstart
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-    def mails(self, folder=None, uidstart=1):
-        # select folder readonly
-        self.connection.select(folder, readonly=True)
+    def newmails(self, uidstart=1):
         # search for and iterate over message uids
         res = self.connection.uid("search", None, f"UID {uidstart}:*")
         uids = assertok(res, "failure while fetching new mail uids")
@@ -42,10 +44,32 @@ class IMAP4Server:
             if int(msg) > uidstart:
                 # fetch message body
                 log.info(f"fetch mail uid {msg}")
-                res = self.connection.uid("fetch", msg, "(RFC822.HEADER RFC822.TEXT)")
-                data = assertok(res, f"failure while fetching message {msg}")
-                # yields [header, body]
-                yield [p[1] for p in data[:2]]
+                yield ImapMail(self, msg)
+
+    # fetch email header
+    def header(self, uid):
+        res = self.connection.uid("fetch", uid, "(RFC822.HEADER)")
+        data = assertok(res, f"failed fetching uid {uid} head")
+        return data[0][1]
+
+    def fullbody(self, uid):
+        res = self.connection.uid("fetch", uid, "(RFC822)")
+        data = assertok(res, f"failed fetching uid {uid} mail")
+        return data[0][1]
+
+
+class ImapMail:
+    def __init__(self, mailserv: Mailserver, uid):
+        self._server = mailserv
+        self.uid = uid
+        self.header = self._server.header(self.uid)
+        self.digest = digest(self.header)
+        self._full = None
+
+    def full(self):
+        if self._full is None:
+            self._full = self._server.fullbody(self.uid)
+        return self._full
 
 
 class Maildir:
@@ -101,7 +125,7 @@ if __name__ == "__main__":
         mbox = Maildir(acc.archive)
 
         log.debug(f"connect to {acc.server}")
-        server = IMAP4Server(acc.server, acc.username, acc.password)
+        server = Mailserver(acc.server, acc.username, acc.password)
 
         db = joinpath(acc.archive, "index")
         log.debug(f"open index at {db}")
@@ -109,13 +133,13 @@ if __name__ == "__main__":
 
         for folder in server.ls():
             log.info(f"process folder {folder}")
-            for header, body in server.mails(folder):
-                H = digest(header)
-                if H not in db:
-                    key = mbox.store(header + body, folder)
-                    db[H] = folder + "/" + key
+            server.cd(folder)
+            for mail in server.newmails():
+                if mail.digest not in db:
+                    key = mbox.store(mail.full(), folder)
+                    db[mail.digest] = folder + "/" + key
                 else:
-                    print(f"message {H} exists already")
+                    print(f"message exists already")
 
         db.close()
         server.connection.close()
