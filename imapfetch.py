@@ -2,8 +2,10 @@
 
 import imaplib
 import mailbox
-import re
 import logging
+import hashlib
+import os
+import re
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
@@ -40,9 +42,10 @@ class IMAP4Server:
             if int(msg) > uidstart:
                 # fetch message body
                 log.info(f"fetch mail uid {msg}")
-                res = self.connection.uid("fetch", msg, "(RFC822)")
+                res = self.connection.uid("fetch", msg, "(RFC822.HEADER RFC822.TEXT)")
                 data = assertok(res, f"failure while fetching message {msg}")
-                yield data[0][1]
+                # yields [header, body]
+                yield [p[1] for p in data[:2]]
 
 
 class Maildir:
@@ -59,27 +62,60 @@ class Maildir:
         msg.set_subdir("cur")
         f[key] = msg
         log.info(f"saved mail {key}")
+        return key
+
+
+class Account:
+    # parse account data from configuration section
+    def __init__(self, section):
+        self.archive = joinpath(".", section.get("archive"))
+        self.server = section.get("server")
+        self.username = section.get("username")
+        self.password = section.get("password")
+
+
+# hash message header for indexing
+def digest(header):
+    return hashlib.blake2b(header).digest()
+
+
+# join paths and return absolute
+def joinpath(base, path):
+    return os.path.abspath(os.path.join(base, os.path.expanduser(path)))
 
 
 # -----------------------------------------------------------------------------------
 if __name__ == "__main__":
 
     import configparser
+    import dbm
 
     conf = configparser.ConfigParser()
     conf.read("settings.conf")
     settings = conf["imapfetch"]
 
     for section in [s for s in conf.sections() if s != "imapfetch"]:
-        acc = conf[section]
+        acc = Account(conf[section])
 
-        log.debug(f"open maildir in {acc.get('archive')}")
-        mbox = Maildir(acc.get("archive"))
+        log.debug(f"open maildir in {acc.archive}")
+        mbox = Maildir(acc.archive)
 
-        log.debug(f"connect to {acc.get('server')}")
-        server = IMAP4Server(acc.get("server"), acc.get("username"), acc.get("password"))
+        log.debug(f"connect to {acc.server}")
+        server = IMAP4Server(acc.server, acc.username, acc.password)
+
+        db = joinpath(acc.archive, "index")
+        log.debug(f"open index at {db}")
+        db = dbm.open(db, flag="c")
 
         for folder in server.ls():
             log.info(f"process folder {folder}")
-            for mail in server.mails(folder):
-                mbox.store(mail, folder)
+            for header, body in server.mails(folder):
+                H = digest(header)
+                if H not in db:
+                    key = mbox.store(header + body, folder)
+                    db[H] = folder + "/" + key
+                else:
+                    print(f"message {H} exists already")
+
+        db.close()
+        server.connection.close()
