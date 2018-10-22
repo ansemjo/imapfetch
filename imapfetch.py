@@ -4,18 +4,22 @@ import imaplib
 import mailbox
 import logging
 import hashlib
+import configparser
+import dbm
+import email
 import os
 import re
 
 logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
 
+
 class Mailserver:
-    FIRSTCHUNK = 64 * 1024
-    NEXTCHUNK = 1024 * 1024
 
     # open connection
-    def __init__(self, server, username, password):
+    def __init__(self, server, username, password, log=log):
+        self.log = log
+        self.log.info(f"connect to {server} as {username}")
         self.connection = imaplib.IMAP4_SSL(server)
         self.connection.login(username, password)
 
@@ -39,6 +43,9 @@ class Mailserver:
                 # fetch message body
                 yield uid
 
+    FIRSTCHUNK = 64 * 1024
+    NEXTCHUNK = 1024 * 1024
+
     # partial generator for a single mail
     def partials(self, uid):
         offset = 1
@@ -55,7 +62,9 @@ class Mailserver:
 
 class Maildir:
     # open a new maildir mailbox
-    def __init__(self, path):
+    def __init__(self, path, log=log):
+        self.log = log
+        self.log.debug(f"open archive in {path}")
         self.box = mailbox.Maildir(path, create=True)
 
     # save a message in mailbox
@@ -81,13 +90,9 @@ class Account:
         self._password = section.get("password")
 
     def __enter__(self):
-        
-        log.debug(f"connect to {self._server} as {self._username}")
-        self.server = Mailserver(self._server, self._username, self._password)
-        
-        log.debug(f"open archive in {self._archive}")
-        self.archive = Maildir(self._archive)
 
+        self.server = Mailserver(self._server, self._username, self._password)
+        self.archive = Maildir(self._archive)
         log.debug(f"open index in {self._index}")
         self.index = dbm.open(self._index, flag="c")
 
@@ -111,10 +116,6 @@ def joinpath(base, path):
 
 # -----------------------------------------------------------------------------------
 if __name__ == "__main__":
-
-    import configparser
-    import dbm
-    import email
 
     conf = configparser.ConfigParser()
     conf.read("settings.conf")
@@ -140,7 +141,6 @@ if __name__ == "__main__":
                     e = email.message_from_bytes(message)
                     e.set_payload("")
                     dgst = digest(e.as_bytes())
-                    log.info(e.get('Date'))
 
                     # mail already exists?
                     if dgst in index:
