@@ -5,7 +5,7 @@ import mailbox
 import re
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
 
 # raise errors if returned status is not OK
@@ -27,25 +27,21 @@ class IMAP4Server:
         folders = assertok(self.connection.list(), "failure getting folder list")
         return (re.sub(r"^\([^)]+\)\s\".\"\s", "", f.decode()) for f in folders)
 
-    # select a folder readonly
-    def select(self, folder=None):
-        return self.connection.select(folder, readonly=True)
-
     # get new mails, starting with uidstart
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-    def mails(self, uidstart=1):
+    def mails(self, folder=None, uidstart=1):
+        # select folder readonly
+        self.connection.select(folder, readonly=True)
         # search for and iterate over message uids
-        uids = assertok(
-            self.connection.uid("search", None, f"UID {uidstart}:*"), "failure while fetching new mail uids"
-        )
+        res = self.connection.uid("search", None, f"UID {uidstart}:*")
+        uids = assertok(res, "failure while fetching new mail uids")
         for msg in uids[0].split():
             # search always returns at least one result
             if int(msg) > uidstart:
                 # fetch message body
                 log.info(f"fetch mail uid {msg}")
-                data = assertok(
-                    self.connection.uid("fetch", msg, "(RFC822)"), f"failure while fetching message {msg}"
-                )
+                res = self.connection.uid("fetch", msg, "(RFC822)")
+                data = assertok(res, f"failure while fetching message {msg}")
                 yield data[0][1]
 
 
@@ -85,6 +81,5 @@ if __name__ == "__main__":
 
         for folder in server.ls():
             log.info(f"process folder {folder}")
-            server.select(folder)
-            for mail in server.mails():
+            for mail in server.mails(folder):
                 mbox.store(mail, folder)
