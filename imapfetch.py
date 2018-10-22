@@ -8,60 +8,61 @@ import logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("imapfetch")
 
-# open imap connection
-def connect(server, username, password):
-    conn = imaplib.IMAP4_SSL(server)
-    conn.login(username, password)
-    return conn
+# raise errors if returned status is not OK
+def assertok(obj, message=None):
+    if obj[0] != "OK":
+        raise ValueError(message if message is not None else obj[0])
+    return obj[1]
 
 
-# get new mails in current folder
-def newmails(connection: imaplib.IMAP4_SSL, last_uid=1):
+class IMAP4Server:
+
+    # open connection
+    def __init__(self, server, username, password):
+        self.connection = imaplib.IMAP4_SSL(server)
+        self.connection.login(username, password)
+
+    # list available folders
+    def ls(self):
+        folders = assertok(self.connection.list(), "failure getting folder list")
+        return (re.sub(r"^\([^)]+\)\s\".\"\s", "", f.decode()) for f in folders)
+
+    # select a folder readonly
+    def select(self, folder=None):
+        return self.connection.select(folder, readonly=True)
+
+    # get new mails, starting with uidstart
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-
-    # search for new message uids
-    res, data = connection.uid("search", None, f"UID {last_uid}:*")
-    if res != "OK":
-        raise ValueError("failure while fetching new mail uids")
-
-    # iterate over all message uids
-    messages = data[0].split()
-    for msg in messages:
-
-        # search always returns at least one result
-        if int(msg) > last_uid:
-
-            # get message body
-            res, data = connection.uid("fetch", msg, "(RFC822)")
-            if res != "OK":
-                raise ValueError(f"failure while fetching message {msg}")
-
-            log.info(f"fetched mail uid {msg}")
-            yield data[0][1]
+    def mails(self, uidstart=1):
+        # search for and iterate over message uids
+        uids = assertok(
+            self.connection.uid("search", None, f"UID {uidstart}:*"), "failure while fetching new mail uids"
+        )
+        for msg in uids[0].split():
+            # search always returns at least one result
+            if int(msg) > uidstart:
+                # fetch message body
+                log.info(f"fetch mail uid {msg}")
+                data = assertok(
+                    self.connection.uid("fetch", msg, "(RFC822)"), f"failure while fetching message {msg}"
+                )
+                yield data[0][1]
 
 
-def lsinbox(connection: imaplib.IMAP4_SSL):
-    # get list of inboxes
-    res, data = connection.list()
-    if res != "OK":
-        raise ValueError("failure getting folder list")
-    sub = lambda s: re.sub(r"^\([^)]+\)\s\".\"\s", "", s)
-    return (sub(f.decode()) for f in data)
+class Maildir:
+    # open a new maildir mailbox
+    def __init__(self, path):
+        self.box = mailbox.Maildir(path, create=True)
 
-
-# open maildir mailbox
-def maildir(path: str):
-    return mailbox.Maildir(path, create=True)
-
-
-# save to maildir
-def savemail(mailbox: mailbox.Mailbox, rfcbody: bytes):
-    key = mailbox.add(rfcbody)
-    m = mailbox.get_message(key)
-    m.set_subdir("cur")
-    m.add_flag("S")
-    mailbox[key] = m
-    log.info(f"saved mail {key}")
+    # save a message in mailbox
+    def store(self, body, folder=None):
+        f = self.box if folder is None else self.box.add_folder(folder)
+        key = f.add(body)
+        msg = f.get_message(key)
+        msg.add_flag("S")
+        msg.set_subdir("cur")
+        f[key] = msg
+        log.info(f"saved mail {key}")
 
 
 # -----------------------------------------------------------------------------------
@@ -76,13 +77,14 @@ if __name__ == "__main__":
     for section in [s for s in conf.sections() if s != "imapfetch"]:
         acc = conf[section]
 
-        mb = maildir(acc.get("archive"))
+        log.debug(f"open maildir in {acc.get('archive')}")
+        mbox = Maildir(acc.get("archive"))
 
-        conn = connect(acc.get("server"), acc.get("username"), acc.get("password"))
+        log.debug(f"connect to {acc.get('server')}")
+        server = IMAP4Server(acc.get("server"), acc.get("username"), acc.get("password"))
 
-        for inbox in lsinbox(conn):
-            log.info(f"process inbox {inbox}")
-            conn.select(inbox, readonly=True)
-            folder = mb.add_folder(inbox)
-            for mail in newmails(conn):
-                savemail(folder, mail)
+        for folder in server.ls():
+            log.info(f"process folder {folder}")
+            server.select(folder)
+            for mail in server.mails():
+                mbox.store(mail, folder)
