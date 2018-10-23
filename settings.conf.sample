@@ -1,0 +1,6 @@
+[mustermann]
+archive     = ./archive
+incremental = yes
+server      = imap.strato.de
+username    = max@mustermann.de
+password    = totalSicheresPassword
