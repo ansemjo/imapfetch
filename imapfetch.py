@@ -10,7 +10,7 @@ import email
 import os
 import re
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("imapfetch")
 
 
@@ -48,13 +48,13 @@ class Mailserver:
 
     # partial generator for a single mail
     def partials(self, uid):
-        offset = 1
+        offset = 0
         chunksize = self.FIRSTCHUNK
         while True:
-            log.debug(f"UID PARTIAL {uid} RFC822 offset={offset} size={chunksize}")
-            wrap, data = self.connection.uid("partial", uid, "RFC822", str(offset), str(chunksize))[1][0]
+            log.debug(f"partial fetch {uid}: offset={offset} size={chunksize}")
+            wrap, data = self.connection.uid("fetch", uid, f"BODY[]<{offset}.{chunksize}>")[1][0]
             yield data
-            if int(re.sub(r".*RFC822 {(\d+)}$", r"\1", wrap.decode())) < chunksize:
+            if int(re.sub(r".*BODY\[\].* {(\d+)}$", r"\1", wrap.decode())) < chunksize:
                 return
             chunksize = self.NEXTCHUNK
             offset += chunksize
@@ -151,7 +151,7 @@ if __name__ == "__main__":
                         for part in partials:
                             message += part
                         # save in local mailbox
-                        key = archive.store(message)
+                        key = archive.store(message, section + "." + folder)
                         index[dgst] = folder + "/" + key
                         # save highest uid
                         if int(uid) > highest:
