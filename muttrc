@@ -1,0 +1,11 @@
+set mbox_type="Maildir"
+set folder="./archive"
+set mask="!^\\.[^.]"
+set mbox="./archive"
+set spoolfile="./archive"
+set record="+.Sent"
+set postponed="+.Drafts"
+
+mailboxes `echo -n "+ "; find ./archive -maxdepth 1 -type d -name ".*" -printf "+'%f' "`
+macro index c "<change-folder>?<toggle-mailboxes>" "open a different folder"
+macro pager c "<change-folder>?<toggle-mailboxes>" "open a different folder"
