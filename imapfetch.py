@@ -128,7 +128,7 @@ class Maildir:
 class Account:
     # parse account data from configuration section
     def __init__(self, section):
-        self._archive = join(section.get("archive", "./archive"))
+        self._archive = join(section.get("archive"))
         self.incremental = section.getboolean("incremental", True)
         self._server = section.get("server")
         self._username = section.get("username")
