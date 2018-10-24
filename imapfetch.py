@@ -39,8 +39,8 @@ unquote = lambda f: re.sub(r'"(.*)"', r"\1", f)
 class Mailserver:
 
     # open connection to server, pass imaplib.IMAP4 if you don't want TLS
-    def __init__(self, server, username, password, logger=l("mailserver"), IMAP=imaplib.IMAP4_SSL):
-        self.log = logger.log
+    def __init__(self, server, username, password, logger=None, IMAP=imaplib.IMAP4_SSL):
+        self.log = logger.getChild('mailserver').log if logger is not None else l('mailserver').log
         self.log(VERBOSE, f"connect to {server} as {username}")
         self.connection = IMAP(server)
         self.connection.login(username, password)
@@ -75,7 +75,7 @@ class Mailserver:
         chunksize = firstchunk
         while True:
             # partial fetch using BODY[]<o.c> syntax
-            self.log(DEBUG, f"partial fetch {int(uid)}: offset={offset} size={chunksize}")
+            self.log(DEBUG, f"fetch {int(uid)}: offset={offset} size={chunksize}")
             wrap, data = self.connection.uid("fetch", uid, f"BODY[]<{offset}.{chunksize}>")[1][0]
             yield data
             # check if the chunksize was smaller than requested --> assume no more data
@@ -88,8 +88,8 @@ class Mailserver:
 class Maildir:
 
     # open a new maildir mailbox
-    def __init__(self, path, logger=l("archive")):
-        self.log = logger.log
+    def __init__(self, path, logger=None):
+        self.log = logger.getChild('archive').log if logger is not None else l('archive').log
         self.dir = path = join(path)
         self.log(VERBOSE, f"open archive in {path}")
         os.makedirs(path, exist_ok=True)
@@ -118,7 +118,7 @@ class Maildir:
         msg.set_subdir("cur")
         box[key] = msg
         self.index[self.digest(message)] = folder + "/" + key
-        self.log(INFO, f"archived mail {key}")
+        self.log(INFO, f"stored {key}")
         return key
 
     # store uid per folder
@@ -134,7 +134,8 @@ class Maildir:
 # and for use in a with..as.. statement.
 class Account:
     # parse account data from configuration section
-    def __init__(self, section):
+    def __init__(self, section, logger=None):
+        self.log = logger
         self._archive = join(section.get("archive"))
         self.incremental = section.getboolean("incremental", True)
         self.exclude = section.get("exclude", "").strip().split("\n")
@@ -144,8 +145,8 @@ class Account:
 
     def __enter__(self):
 
-        self.server = Mailserver(self._server, self._username, self._password)
-        self.archive = Maildir(self._archive)
+        self.server = Mailserver(self._server, self._username, self._password, logger=self.log)
+        self.archive = Maildir(self._archive, logger=self.log)
 
         return self, self.server, self.archive
 
@@ -194,14 +195,14 @@ if __name__ == "__main__":
         # if --list is given only connect and show folders
         if args.list:
             acc = Account(conf[section])
-            serv = Mailserver(acc._server, acc._username, acc._password)
+            serv = Mailserver(acc._server, acc._username, acc._password, logger=l(section))
             sectlog(VERBOSE, "listing folders:")
             for f in serv.ls():
                 sectlog(INFO, f)
             continue
 
         # open account for this section
-        with Account(conf[section]) as (acc, server, archive):
+        with Account(conf[section], logger=l(section)) as (acc, server, archive):
 
             # iterate over all folders
             for folder in server.ls():
