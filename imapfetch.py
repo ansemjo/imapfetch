@@ -185,4 +185,4 @@ if __name__ == "__main__":
                         # save in archive and store highest uid
                         archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
                         if int(uid) > highest:
-                            archive.setuid(folder, uid)
+                            archive.setuid(section + "/" + folder, uid)
