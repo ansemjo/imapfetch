@@ -5,15 +5,16 @@ server and store them locally in a maildir format, e.g. for backup purposes.
 
 ## SYNOPSIS
 
-Configure your accounts using the provided configuration [sample](settings.conf.sample) and run:
+Configure your accounts using the provided configuration [sample](assets/settings.conf.sample) and
+run:
 
-    ./imapfetch.py settings.conf
+    imapfetch settings.conf
 
 ## USAGE
 
 Use `--help` to see a list of possible options:
 
-    ./imapfetch.py [-h] [--full] [--list] [--verbose] config [section [section ...]]
+    imapfetch [-h] [--full] [--list] [--verbose] config [section [section ...]]
 
 The configuration file is passed as the first positional argument. If you pass any more positional
 arguments, they are assumed to be section names and only those sections will be used during
@@ -74,7 +75,7 @@ This is done to detect duplicates and avoid storing a mail twice if it is moved 
 
 ### BACKUP
 
-Once `imapfetch.py` is done you have a local copy of all your mails. This is a one-way operation, no
+Once `imapfetch` is done you have a local copy of all your mails. This is a one-way operation, no
 mails that are deleted online are deleted in your archive. Since the maildir format is a very simple
 one, you can then backup that entire directory as-is with tools like
 [borg](https://www.borgbackup.org/) or [restic](https://restic.net/). Both do a fantastic job at
@@ -91,8 +92,8 @@ you might do something like this:
 
 Generally all applications that handle maildir mailboxes should be able to browse your archive.
 `mutt` is a very simple terminal application that is able to handle these archives with an absolute
-minimum configuration. A sample is [provided](muttrc) with this project. Just copy the `muttrc` to
-your `archive` directory and run:
+minimum configuration. A sample is [provided](assets/muttrc) with this project. Just copy the
+`muttrc` to your `archive` directory and run:
 
     cd path/to/my/archive
     mutt -F ./muttrc
@@ -108,7 +109,14 @@ Currently no "official" installation procedure exists. Just make sure you run a 
 Python 3 (anything over `3.5` _should_ work, development was done on `3.7`) and copy the script to a
 directory you want to execute it in.
 
-TODO: `pip`, `deb` and `rpm` packages.
+TODO: `deb` and `rpm` packages.
+
+### PIP
+
+Install the package via `pip` by running:
+
+    python setup.py install --user
+    imapfetch --help
 
 ## LICENSE
 

@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
 
-import setuptools
+from setuptools import setup, find_packages
 
-setuptools.setup(
-    
-    name = "imapfetch",
-    version = "0.1",
-    url = "https://github.com/ansemjo/imapfetch",
-    
-    author = "Anton Semjonov",
-    author_email = "anton@semjonov.de",
-    
-    packages=setuptools.find_packages(),
-    entry_points={
-        "console_scripts": [
-          "imapfetch = imapfetch.imapfetch:imapfetch",
-        ]
-    },
-
+setup(
+    name="imapfetch",
+    version="0.1",
+    author="Anton Semjonov",
+    author_email="anton@semjonov.de",
+    url="https://github.com/ansemjo/imapfetch",
+    packages=find_packages(),
+    entry_points={"console_scripts": ["imapfetch = imapfetch.imapfetch:imapfetch"]},
 )
