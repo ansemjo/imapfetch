@@ -1,3 +1,5 @@
+#! /usr/bin/mutt -F
+
 set mbox_type="Maildir"
 set folder="./"
 set mask="!^\\.[^.]"
