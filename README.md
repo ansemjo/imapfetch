@@ -108,14 +108,23 @@ decently fast for example.
 Make sure you run a decently modern Python 3 (anything newer than `3.5` _should_ work, development
 was done on `3.7`).
 
-TODO: `deb`, `rpm`, `AUR`
+TODO: `deb`, `rpm`
 
 ### PIP
 
 Install the package via `pip` by running:
 
-    pip install https://github.com/ansemjo/imapfetch/archive/master.tar.gz
-    imapfetch --help
+    pip install https://github.com/ansemjo/imapfetch/archive/master.tar.gz [--user]
+
+### AUR
+
+On Arch Linux install `imapfetch` with an AUR helper:
+
+    yay -S imapfetch
+
+Or use the `PKGBUILD` in `master` to build `imapfetch-git` locally:
+
+    makepkg -i
 
 ## LICENSE
 
