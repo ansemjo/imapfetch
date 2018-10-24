@@ -5,13 +5,14 @@ import mailbox
 import logging
 import hashlib
 import configparser
+from argparse import Namespace
 import dbm
 import email
 import os
 import re
 
 # TODO: seperate logging per class/folder
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("imapfetch")
 
 # cryptographic hash for indexing purposes
@@ -43,11 +44,11 @@ class Mailserver:
 
     # get new mail uids in current folder, starting with uidstart
     # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-    def mails(self, uidstart=0):
+    def mails(self, uidstart=1):
         # search for and iterate over message uids
         uids = self.connection.uid("search", None, f"UID {uidstart}:*")[1]
         for uid in uids[0].split():
-            if int(uid) > uidstart:
+            if int(uid) >= uidstart:
                 yield uid
 
     # chunk sizes for partial fetches
@@ -80,26 +81,46 @@ class Maildir:
     # open a new maildir mailbox
     def __init__(self, path, log=log):
         self.log = log
+        self.dir = path = join(path)
         self.log.debug(f"open archive in {path}")
         if not os.path.isdir(path):
             raise ValueError(f"path {path} is not a directory")
-        self.dir = join(path)
-        self.index = dbm.open(join("index", self.dir), flag="c")
+        self.log.debug("open index")
+        self.index = dbm.open(join("index", path), flag="c")
 
     # cleanup
     def close(self):
         return self.index.close()
 
+    # get indexing key by hashing message header
+    def digest(self, message):
+        message = email.message_from_bytes(message)
+        message.set_payload("")
+        return Blake2b(message.as_bytes())
+
+    # test if a message is already in the archive by hashing the header
+    def __contains__(self, message):
+        return self.digest(message) in self.index
+
     # save a message in mailbox
-    def store(self, body, folder):
+    def store(self, message, folder):
         box = mailbox.Maildir(join(folder, self.dir), create=True)
-        key = box.add(body)
+        key = box.add(message)
         msg = box.get_message(key)
         msg.add_flag("S")
         msg.set_subdir("cur")
         box[key] = msg
+        self.index[self.digest(message)] = folder + "/" + key
         log.info(f"saved mail {key}")
         return key
+
+    # store uid per folder
+    def setuid(self, folder, uid):
+        self.index["UID:" + folder] = uid
+
+    # retrieve highest seen uid per folder, default 0
+    def getuid(self, folder):
+        return self.index.get("UID:" + folder, 1)
 
 
 # Account is a configuration helper, parsing a section from a configuration file
@@ -136,35 +157,32 @@ if __name__ == "__main__":
         with Account(conf[section]) as (acc, server, archive):
 
             for folder in server.ls():
+
                 log.info(f"process folder {folder}")
-
                 server.cd(folder)
-                highest = int(archive.index.get(folder, 0))
+                highest = int(archive.getuid(folder)) if acc.incremental else 1
 
-                for uid in server.mails(highest if acc.incremental else 1):
+                for uid in server.mails(highest):
+
+                    # email chunk generator
                     partials = server.partials(uid)
+                    message = b""
 
-                    # get header chunk
-                    message = next(partials)
+                    # get enough chunks for header
                     while not (b"\r\n\r\n" in message or b"\n\n" in message):
                         message += next(partials)
 
-                    # get digest of header only
-                    e = email.message_from_bytes(message)
-                    e.set_payload("")
-                    digest = Blake2b(e.as_bytes())
-
-                    # mail already exists?
-                    if digest in archive.index:
+                    # does the mail already exists?
+                    if message in archive:
                         log.debug("message exists already")
 
                     else:
+
                         # assemble full message
                         for part in partials:
                             message += part
-                        # save in local mailbox
-                        key = archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
-                        archive.index[digest] = folder + "/" + key
-                        # save highest uid
+
+                        # save in archive and store highest uid
+                        archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
                         if int(uid) > highest:
-                            archive.index[folder] = uid
+                            archive.setuid(folder, uid)
