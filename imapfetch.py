@@ -11,9 +11,15 @@ import email
 import os
 import re
 
-# TODO: seperate logging per class/folder
-logging.basicConfig(level=logging.INFO)
+# colorful logging levels (with added VERBOSE intermediate)
+INFO, VERBOSE, DEBUG = logging.INFO, 15, logging.DEBUG
+logging.addLevelName(INFO, "\033[34;1mINFO\033[0m")
+logging.addLevelName(VERBOSE, "\033[33;1mVERBOSE\033[0m")
+logging.addLevelName(DEBUG, "\033[35;1mDEBUG\033[0m")
+
+# shorthand to get a named logger
 log = logging.getLogger("imapfetch")
+l = lambda n: log.getChild(n)
 
 # cryptographic hash for indexing purposes
 Blake2b = lambda b: hashlib.blake2b(b, digest_size=32).digest()
@@ -27,9 +33,9 @@ join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser
 class Mailserver:
 
     # open connection to server, pass imaplib.IMAP4 if you don't want TLS
-    def __init__(self, server, username, password, log=log, IMAP=imaplib.IMAP4_SSL):
-        self.log = log
-        self.log.info(f"connect to {server} as {username}")
+    def __init__(self, server, username, password, logger=l("mailserver"), IMAP=imaplib.IMAP4_SSL):
+        self.log = logger.log
+        self.log(VERBOSE, f"connect to {server} as {username}")
         self.connection = IMAP(server)
         self.connection.login(username, password)
 
@@ -63,7 +69,7 @@ class Mailserver:
         chunksize = firstchunk
         while True:
             # partial fetch using BODY[]<o.c> syntax
-            self.log.debug(f"partial fetch {int(uid)}: offset={offset} size={chunksize}")
+            self.log(DEBUG, f"partial fetch {int(uid)}: offset={offset} size={chunksize}")
             wrap, data = self.connection.uid("fetch", uid, f"BODY[]<{offset}.{chunksize}>")[1][0]
             yield data
             # check if the chunksize was smaller than requested --> assume no more data
@@ -79,12 +85,11 @@ class Mailserver:
 class Maildir:
 
     # open a new maildir mailbox
-    def __init__(self, path, log=log):
-        self.log = log
+    def __init__(self, path, logger=l("archive")):
+        self.log = logger.log
         self.dir = path = join(path)
-        self.log.debug(f"open archive in {path}")
+        self.log(VERBOSE, f"open archive in {path}")
         os.makedirs(path, exist_ok=True)
-        self.log.debug("open index")
         self.index = dbm.open(join("index", path), flag="c")
 
     # cleanup
@@ -110,7 +115,7 @@ class Maildir:
         msg.set_subdir("cur")
         box[key] = msg
         self.index[self.digest(message)] = folder + "/" + key
-        log.info(f"saved mail {key}")
+        self.log(INFO, f"archived mail {key}")
         return key
 
     # store uid per folder
@@ -154,29 +159,56 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("config", help="configuration file", type=argparse.FileType("r"))
     parser.add_argument("section", help="sections to execute", nargs="*")
-    parser.add_argument("--full", help="do full backups", action="store_true")
+    parser.add_argument("--full", "-f", help="do full backups", action="store_true")
+    parser.add_argument("--verbose", "-v", help="increase verbosity", action="count", default=0)
     args = parser.parse_args()
 
+    # initialise logging level and format
+    clamp = lambda v, l, u: v if v > l else l if v < u else u
+    logging.basicConfig(
+        level=clamp(20 - 5 * args.verbose, 10, 20), format="[%(levelname)18s] %(name)s: %(message)s"
+    )
+    log.log(DEBUG, args)
+
+    # read configuration
+    log.log(VERBOSE, f"read configuration from {args.config.name}")
     conf = configparser.ConfigParser()
     conf.read_file(args.config)
 
+    # iterate over configuration sections
     for section in conf.sections():
 
+        # skip if sections given and it is not contained
         if len(args.section) >= 1 and section not in args.section:
+            log.log(DEBUG, f"section {section} skipped")
             continue
 
+        # open account for this section
+        log.log(INFO, f"processing section {section}")
+        sectlog = l(section).log
         with Account(conf[section]) as (acc, server, archive):
 
+            # iterate over all folders
+            # TODO: add "exclude" configuration
             for folder in server.ls():
 
-                log.info(f"process folder {folder}")
+                sectlog(INFO, f"processing folder {folder}")
                 server.cd(folder)
-                uidkey = section + "/" + folder
-                highest = int(archive.getuid(uidkey)) if not args.full and acc.incremental else 1
 
+                # retrieve the highest known uid for incremental runs
+                uidkey = section + "/" + folder
+                if not args.full and acc.incremental:
+                    highest = int(archive.getuid(uidkey))
+                    sectlog(DEBUG, f"highest saved uid for {uidkey} = {highest}")
+                else:
+                    highest = 1
+                    sectlog(VERBOSE, "starting at uid 1")
+
+                # iterate over all uids >= highest
                 for uid in server.mails(highest):
 
                     # email chunk generator
+                    sectlog(DEBUG, f"read email uid {int(uid)}")
                     partials = server.partials(uid)
                     message = b""
 
@@ -186,7 +218,7 @@ if __name__ == "__main__":
 
                     # does the mail already exists?
                     if message in archive:
-                        log.debug("message exists already")
+                        sectlog(VERBOSE, f"message {int(uid)} exists already")
 
                     else:
 
