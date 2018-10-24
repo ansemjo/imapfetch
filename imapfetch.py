@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# Copyright (c) 2018 Anton Semjonov
+# Licensed under the MIT License
+
 import imaplib
 import mailbox
 import logging
