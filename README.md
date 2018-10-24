@@ -81,6 +81,12 @@ one, you can then backup that entire directory as-is with tools like
 deduplicating existing data, so you don't waste much space even if you take daily or even hourly
 snapshots.
 
+If you are sufficiently sure that you will never have a folder called `backup` on your mailserver
+you might do something like this:
+
+    borg init --encryption repokey-blake2 ./backup
+    borg create --stats --progress --compression lz4 ./backup::$(date --utc +%F-%H%M%S%Z) INBOX*/ index
+
 ### VIEWING
 
 Generally all applications that handle maildir mailboxes should be able to browse your archive.
