@@ -17,9 +17,8 @@ log = logging.getLogger("imapfetch")
 # cryptographic hash for indexing purposes
 Blake2b = lambda b: hashlib.blake2b(b).digest()
 
-# path utilities, join path to absolute and expand ~ home
-path = os.path
-join = lambda p, base=".": path.abspath(path.join(base, path.expanduser(p)))
+# join path to absolute and expand ~ home
+join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
 
 # Mailserver is a connection helper to an IMAP4 server.
 #! Since most IMAP operations are performed on the currently selected folder
@@ -82,16 +81,18 @@ class Maildir:
     def __init__(self, path, log=log):
         self.log = log
         self.log.debug(f"open archive in {path}")
-        self.box = mailbox.Maildir(path, create=True)
+        if not os.path.isdir(path):
+            raise ValueError(f"path {path} is not a directory")
+        self.dir = path
 
     # save a message in mailbox
-    def store(self, body, folder=None):
-        f = self.box if folder is None else self.box.add_folder(folder)
-        key = f.add(body)
-        msg = f.get_message(key)
+    def store(self, body, folder):
+        box = mailbox.Maildir(join(folder, self.dir), create=True)
+        key = box.add(body)
+        msg = box.get_message(key)
         msg.add_flag("S")
         msg.set_subdir("cur")
-        f[key] = msg
+        box[key] = msg
         log.info(f"saved mail {key}")
         return key
 
@@ -149,10 +150,10 @@ if __name__ == "__main__":
                     # get digest of header only
                     e = email.message_from_bytes(message)
                     e.set_payload("")
-                    dgst = Blake2b(e.as_bytes())
+                    digest = Blake2b(e.as_bytes())
 
                     # mail already exists?
-                    if dgst in index:
+                    if digest in index:
                         log.debug("message exists already")
 
                     else:
@@ -160,8 +161,8 @@ if __name__ == "__main__":
                         for part in partials:
                             message += part
                         # save in local mailbox
-                        key = archive.store(message, section + "." + folder)
-                        index[dgst] = folder + "/" + key
+                        key = archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
+                        index[digest] = folder + "/" + key
                         # save highest uid
                         if int(uid) > highest:
                             index[folder] = uid
