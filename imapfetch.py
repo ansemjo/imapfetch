@@ -81,9 +81,8 @@ class Mailserver:
             # check if the chunksize was smaller than requested --> assume no more data
             if int(re.sub(r".*BODY\[\].* {(\d+)}$", r"\1", wrap.decode())) < chunksize:
                 return
-            chunksize = nextchunk
             offset += chunksize
-
+            chunksize = nextchunk
 
 # Maildir is a maildir-based email storage for local on-disk archival.
 class Maildir:
