@@ -1,4 +1,5 @@
 #! /usr/bin/mutt -F
+# http://www.elho.net/mutt/maildir/
 
 set mbox_type="Maildir"
 set folder="./"
