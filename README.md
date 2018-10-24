@@ -105,17 +105,16 @@ decently fast for example.
 
 ## INSTALL
 
-Currently no "official" installation procedure exists. Just make sure you run a decently modern
-Python 3 (anything over `3.5` _should_ work, development was done on `3.7`) and copy the script to a
-directory you want to execute it in.
+Make sure you run a decently modern Python 3 (anything newer than `3.5` _should_ work, development
+was done on `3.7`).
 
-TODO: `deb` and `rpm` packages.
+TODO: `deb`, `rpm`, `AUR`
 
 ### PIP
 
 Install the package via `pip` by running:
 
-    python setup.py install --user
+    pip install https://github.com/ansemjo/imapfetch/archive/master.tar.gz
     imapfetch --help
 
 ## LICENSE

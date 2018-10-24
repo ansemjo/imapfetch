@@ -1,13 +1,34 @@
 #!/usr/bin/env python3
 
-from setuptools import setup, find_packages
+from os.path import isdir
+from subprocess import check_output as cmd
+from setuptools import setup
+
+# package name
+name = "imapfetch"
+
+# package version and commit hash
+version = "0.1.0"
+commit = "$Format:%h$"
+
+# try to get the most specific version possible
+if "Format:" not in commit:
+    version = version + "-" + commit
+
+if isdir(".git"):
+    version = cmd(["git", "describe", "--always", "--long", "--dirty"]).strip().decode()
+
+# author information
+author = "Anton Semjonov"
+email = "anton@semjonov.de"
+github = f"https://github.com/ansemjo/{name}"
 
 setup(
-    name="imapfetch",
-    version="0.1",
-    author="Anton Semjonov",
-    author_email="anton@semjonov.de",
-    url="https://github.com/ansemjo/imapfetch",
-    packages=find_packages(),
-    entry_points={"console_scripts": ["imapfetch = imapfetch.imapfetch:imapfetch"]},
+    name=name,
+    version=version,
+    author=author,
+    author_email=email,
+    url=github,
+    packages=[name],
+    entry_points={"console_scripts": [f"{name} = {name}.{name}:{name}"]},
 )
