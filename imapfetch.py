@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger("imapfetch")
 
 # cryptographic hash for indexing purposes
-Blake2b = lambda b: hashlib.blake2b(b).digest()
+Blake2b = lambda b: hashlib.blake2b(b, digest_size=32).digest()
 
 # join path to absolute and expand ~ home
 join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
