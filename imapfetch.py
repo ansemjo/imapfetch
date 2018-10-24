@@ -83,7 +83,12 @@ class Maildir:
         self.log.debug(f"open archive in {path}")
         if not os.path.isdir(path):
             raise ValueError(f"path {path} is not a directory")
-        self.dir = path
+        self.dir = join(path)
+        self.index = dbm.open(join("index", self.dir), flag="c")
+
+    # cleanup
+    def close(self):
+        return self.index.close()
 
     # save a message in mailbox
     def store(self, body, folder):
@@ -103,7 +108,6 @@ class Account:
     # parse account data from configuration section
     def __init__(self, section):
         self._archive = join(section.get("archive", "./archive"))
-        self._index = join("index", base=self._archive)
         self.incremental = section.getboolean("incremental", True)
         self._server = section.get("server")
         self._username = section.get("username")
@@ -113,13 +117,11 @@ class Account:
 
         self.server = Mailserver(self._server, self._username, self._password)
         self.archive = Maildir(self._archive)
-        log.debug(f"open index in {self._index}")
-        self.index = dbm.open(self._index, flag="c")
 
-        return self, self.server, self.archive, self.index
+        return self, self.server, self.archive
 
     def __exit__(self, type, value, traceback):
-        self.index.close()
+        self.archive.close()
         self.server.connection.close()
         self.server.connection.logout()
 
@@ -131,13 +133,13 @@ if __name__ == "__main__":
     conf.read("settings.conf")
 
     for section in conf.sections():
-        with Account(conf[section]) as (acc, server, archive, index):
+        with Account(conf[section]) as (acc, server, archive):
 
             for folder in server.ls():
                 log.info(f"process folder {folder}")
 
                 server.cd(folder)
-                highest = int(index.get(folder, 0))
+                highest = int(archive.index.get(folder, 0))
 
                 for uid in server.mails(highest if acc.incremental else 1):
                     partials = server.partials(uid)
@@ -153,7 +155,7 @@ if __name__ == "__main__":
                     digest = Blake2b(e.as_bytes())
 
                     # mail already exists?
-                    if digest in index:
+                    if digest in archive.index:
                         log.debug("message exists already")
 
                     else:
@@ -162,7 +164,7 @@ if __name__ == "__main__":
                             message += part
                         # save in local mailbox
                         key = archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
-                        index[digest] = folder + "/" + key
+                        archive.index[digest] = folder + "/" + key
                         # save highest uid
                         if int(uid) > highest:
-                            index[folder] = uid
+                            archive.index[folder] = uid
