@@ -157,7 +157,7 @@ class Account:
 
 
 # -----------------------------------------------------------------------------------
-if __name__ == "__main__":
+def imapfetch():
 
     import argparse
     import fnmatch
@@ -258,3 +258,6 @@ if __name__ == "__main__":
                         archive.setuid(uidkey, uid)
                         highest = int(uid)
 
+
+if __name__ == "__main__":
+    imapfetch()
