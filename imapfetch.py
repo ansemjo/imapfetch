@@ -150,17 +150,30 @@ class Account:
 # -----------------------------------------------------------------------------------
 if __name__ == "__main__":
 
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", help="configuration file", type=argparse.FileType("r"))
+    parser.add_argument("section", help="sections to execute", nargs="*")
+    parser.add_argument("--full", help="do full backups", action="store_true")
+    args = parser.parse_args()
+
     conf = configparser.ConfigParser()
-    conf.read("settings.conf")
+    conf.read_file(args.config)
 
     for section in conf.sections():
+
+        if len(args.section) >= 1 and section not in args.section:
+            continue
+
         with Account(conf[section]) as (acc, server, archive):
 
             for folder in server.ls():
 
                 log.info(f"process folder {folder}")
                 server.cd(folder)
-                highest = int(archive.getuid(folder)) if acc.incremental else 1
+                uidkey = section + "/" + folder
+                highest = int(archive.getuid(uidkey)) if not args.full and acc.incremental else 1
 
                 for uid in server.mails(highest):
 
@@ -181,8 +194,11 @@ if __name__ == "__main__":
                         # assemble full message
                         for part in partials:
                             message += part
-
-                        # save in archive and store highest uid
+                        # save in archive
                         archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
-                        if int(uid) > highest:
-                            archive.setuid(section + "/" + folder, uid)
+
+                    # store highest seen uid per folder
+                    if int(uid) > highest:
+                        archive.setuid(uidkey, uid)
+                        highest = int(uid)
+
