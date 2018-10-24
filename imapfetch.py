@@ -83,8 +83,7 @@ class Maildir:
         self.log = log
         self.dir = path = join(path)
         self.log.debug(f"open archive in {path}")
-        if not os.path.isdir(path):
-            raise ValueError(f"path {path} is not a directory")
+        os.makedirs(path, exist_ok=True)
         self.log.debug("open index")
         self.index = dbm.open(join("index", path), flag="c")
 
