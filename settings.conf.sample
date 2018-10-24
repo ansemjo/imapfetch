@@ -1,6 +1,21 @@
+# Sample configuration file for imapfetch.
+# Common settings for multiple sections can be put
+# in the special [DEFAULT] section.
+
 [mustermann]
-archive     = ./archive
-incremental = yes
+# Path where the archive will be stored.
+# '~' is expanded to user's $HOME.
+archive     = ~/mailarchive
+
+# IMAP connection details. SSL is required.
 server      = imap.strato.de
 username    = max@mustermann.de
-password    = totalSicheresPassword
+password    = verySecurePassword
+
+# Optional: Save the highest seen UID per folder and resume there.
+incremental = yes
+
+# Optional: UNIX-style globbing pattern to exclude folders, multiple lines.
+exclude =
+  INBOX.Junk
+  INBOX.Mailinglists.*

@@ -27,6 +27,9 @@ Blake2b = lambda b: hashlib.blake2b(b, digest_size=32).digest()
 # join path to absolute and expand ~ home
 join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
 
+# remove quotes around folder name
+unquote = lambda f: re.sub(r'"(.*)"', r"\1", f)
+
 # Mailserver is a connection helper to an IMAP4 server.
 #! Since most IMAP operations are performed on the currently selected folder
 #! this is absolutely not safe for concurrent use. Weird things will happen.
@@ -80,8 +83,6 @@ class Mailserver:
 
 
 # Maildir is a maildir-based email storage for local on-disk archival.
-# TODO: use plain named subfolders without dot-prefix (similar to thunderbird)
-# TODO: integrate the index dbm directly
 class Maildir:
 
     # open a new maildir mailbox
@@ -134,6 +135,7 @@ class Account:
     def __init__(self, section):
         self._archive = join(section.get("archive"))
         self.incremental = section.getboolean("incremental", True)
+        self.exclude = section.get("exclude", "").strip().split("\n")
         self._server = section.get("server")
         self._username = section.get("username")
         self._password = section.get("password")
@@ -155,11 +157,13 @@ class Account:
 if __name__ == "__main__":
 
     import argparse
+    import fnmatch
 
     parser = argparse.ArgumentParser()
     parser.add_argument("config", help="configuration file", type=argparse.FileType("r"))
     parser.add_argument("section", help="sections to execute", nargs="*")
     parser.add_argument("--full", "-f", help="do full backups", action="store_true")
+    parser.add_argument("--list", "-l", help="only list folders", action="store_true")
     parser.add_argument("--verbose", "-v", help="increase verbosity", action="count", default=0)
     args = parser.parse_args()
 
@@ -182,15 +186,33 @@ if __name__ == "__main__":
         if len(args.section) >= 1 and section not in args.section:
             log.log(DEBUG, f"section {section} skipped")
             continue
-
-        # open account for this section
         log.log(INFO, f"processing section {section}")
         sectlog = l(section).log
+
+        # if --list is given only connect and show folders
+        if args.list:
+            acc = Account(conf[section])
+            serv = Mailserver(acc._server, acc._username, acc._password)
+            sectlog(VERBOSE, "listing folders:")
+            for f in serv.ls():
+                sectlog(INFO, f)
+            continue
+
+        # open account for this section
         with Account(conf[section]) as (acc, server, archive):
 
             # iterate over all folders
-            # TODO: add "exclude" configuration
             for folder in server.ls():
+
+                # test for exclusion matches
+                try:
+                    f = unquote(folder)
+                    for ex in acc.exclude:
+                        if fnmatch.fnmatch(f, ex):
+                            sectlog(VERBOSE, f"folder {f} excluded due to '{ex}'")
+                            raise ValueError()
+                except ValueError:
+                    continue
 
                 sectlog(INFO, f"processing folder {folder}")
                 server.cd(folder)
@@ -226,7 +248,7 @@ if __name__ == "__main__":
                         for part in partials:
                             message += part
                         # save in archive
-                        archive.store(message, re.sub(r'"(.*)"', r"\1", folder))
+                        archive.store(message, unquote(folder))
 
                     # store highest seen uid per folder
                     if int(uid) > highest:
