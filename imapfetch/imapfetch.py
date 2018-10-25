@@ -14,11 +14,14 @@ import email
 import os
 import re
 
+# system is windows
+nt = os.name == "nt"
+
 # colorful logging levels (with added VERBOSE intermediate)
 INFO, VERBOSE, DEBUG = logging.INFO, 15, logging.DEBUG
-logging.addLevelName(INFO, "\033[34;1mINFO\033[0m")
-logging.addLevelName(VERBOSE, "\033[33;1mVERBOSE\033[0m")
-logging.addLevelName(DEBUG, "\033[35;1mDEBUG\033[0m")
+logging.addLevelName(INFO, "\033[34;1mINFO\033[0m" if not nt else "INFO")
+logging.addLevelName(VERBOSE, "\033[33;1mVERBOSE\033[0m" if not nt else "VERBOSE")
+logging.addLevelName(DEBUG, "\033[35;1mDEBUG\033[0m" if not nt else "DEBUG")
 
 # shorthand to get a named logger
 log = logging.getLogger("imapfetch")
@@ -112,6 +115,8 @@ class Maildir:
     # save a message in mailbox
     def store(self, message, folder):
         box = mailbox.Maildir(join(folder, self.dir), create=True)
+        if nt:
+            box.colon = '!'
         key = box.add(message)
         msg = box.get_message(key)
         msg.add_flag("S")
@@ -173,7 +178,7 @@ def imapfetch():
     # initialise logging level and format
     clamp = lambda v, l, u: v if v > l else l if v < u else u
     logging.basicConfig(
-        level=clamp(20 - 5 * args.verbose, 10, 20), format="[%(levelname)18s] %(name)s: %(message)s"
+        level=clamp(20 - 5 * args.verbose, 10, 20), format=f"[%(levelname){7 if nt else 18}s] %(name)s: %(message)s"
     )
     log.log(DEBUG, args)
 
