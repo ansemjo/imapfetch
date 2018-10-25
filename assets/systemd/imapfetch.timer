@@ -1,0 +1,9 @@
+# ~/.config/systemd/user/
+[Unit]
+Description=Periodic fetching of E-Mails with imapfetch.py
+
+[Timer]
+OnCalendar=hourly
+
+[Install]
+WantedBy=multi-user.target

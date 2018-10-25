@@ -1,0 +1,8 @@
+# ~/.config/systemd/user/
+[Unit]
+Description=Fetch E-Mails with imapfetch.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/imapfetch %h/.config/imapfetch.cfg
+StandardError=journal
