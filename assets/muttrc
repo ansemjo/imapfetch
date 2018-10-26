@@ -1,14 +1,31 @@
-#! /usr/bin/mutt -F
-# http://www.elho.net/mutt/maildir/
+#! /usr/bin/mutt -RF
+# make executable to open mutt read-only with this config
 
+# sources / useful info:
+# - http://www.elho.net/mutt/maildir/
+# - https://jcs.org/notaweblog/2008/09/29/making_mutt_useful_offline
+# - https://gitlab.com/muttmua/mutt/wikis/ConfigTricks
+
+# enable threads and newest on top
+set sort="threads"
+set sort_aux="reverse-last-date-received"
+
+# load user's muttrc if present
+source `f=~/.muttrc;      [ ! -s "$f" ] && echo /dev/null || echo "$f"`
+source `f=~/.mutt/muttrc; [ ! -s "$f" ] && echo /dev/null || echo "$f"`
+
+# unset drafts and sent handling, disable imap connections
+unset postponed
+unset record
+set imap_passive="yes"
+
+# use local imapfetch maildir archive
 set mbox_type="Maildir"
 set folder="./"
-set mask="!^\\.[^.]"
-set mbox="./INBOX"
-set spoolfile="./INBOX"
-set record="+Sent"
-set postponed="+Drafts"
+set mbox="+INBOX"
+set spoolfile="+INBOX"
 
-mailboxes `find ./ -mindepth 1 -maxdepth 1 -type d -printf "+'%f' "`
+# dynamically build list of maildir inboxes
+mailboxes `find -type d -name cur -printf "+'%h' "`
 macro index c "<change-folder>?<toggle-mailboxes>" "open a different folder"
 macro pager c "<change-folder>?<toggle-mailboxes>" "open a different folder"
