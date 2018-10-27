@@ -8,7 +8,8 @@ import mailbox
 import logging
 import hashlib
 import configparser
-from argparse import Namespace
+import time
+import binascii
 import dbm
 import email
 import os
@@ -87,10 +88,28 @@ class Mailserver:
             offset += chunksize
             chunksize = nextchunk
 
-# Maildir is a maildir-based email storage for local on-disk archival.
-class Maildir:
+# EmlMaildir subclasses mailbox.Maildir to change generation of new filenames
+class EmlMaildir(mailbox.Maildir):
 
-    # open a new maildir mailbox
+    # modified from https://github.com/python/cpython/blob/master/Lib/mailbox.py
+    def _create_tmp(self):
+        now = time.time()
+        rand = binascii.hexlify(os.urandom(4)).decode()
+        uniq = f"{now:.8f}.{rand}.eml"
+        path = os.path.join(self._path, 'tmp', uniq)
+        try:
+            os.stat(path)
+        except FileNotFoundError:
+            try:
+                return mailbox._create_carefully(path)
+            except FileExistsError:
+                pass
+        raise mailbox.ExternalClashError(f'name clash prevented file creation: {path}')
+
+# Archive is a maildir-based email storage for local on-disk archival.
+class Archive:
+
+    # open a new archive
     def __init__(self, path, logger=None):
         self.log = logger.getChild('archive').log if logger is not None else l('archive').log
         self.dir = path = join(path)
@@ -114,12 +133,11 @@ class Maildir:
 
     # save a message in mailbox
     def store(self, message, folder):
-        box = mailbox.Maildir(join(folder, self.dir), create=True)
+        box = EmlMaildir(join(folder, self.dir), create=True)
         if nt:
             box.colon = '!'
         key = box.add(message)
         msg = box.get_message(key)
-        msg.add_flag("S")
         msg.set_subdir("cur")
         box[key] = msg
         self.index[self.digest(message)] = folder + "/" + key
@@ -151,7 +169,7 @@ class Account:
     def __enter__(self):
 
         self.server = Mailserver(self._server, self._username, self._password, logger=self.log)
-        self.archive = Maildir(self._archive, logger=self.log)
+        self.archive = Archive(self._archive, logger=self.log)
 
         return self, self.server, self.archive
 
