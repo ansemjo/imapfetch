@@ -27,7 +27,7 @@ $(DESTDIR)/usr/share/doc/imapfetch/README.md : README.md
 FORMATS = rpm deb apk
 
 # package version
-VERSION := 0.1-$Format:%h$
+VERSION := 0.2.0-$Format:%h$
 VERSION := $(shell [[ $(VERSION) = *-ormat:* ]] && git describe --always || echo $(VERSION))
 
 .PHONY: fpm

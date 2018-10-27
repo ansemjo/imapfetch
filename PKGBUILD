@@ -4,7 +4,7 @@ pkgname="imapfetch-git"
 _pkgname=(${pkgname%-git})
 pkgdesc="Download all e-mails from an IMAP4 mailserver and store them locally in maildir format."
 
-pkgver=0.1.0.r0.8284474
+pkgver=0.0.0
 pkgrel=1
 
 arch=('any')

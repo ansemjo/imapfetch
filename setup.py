@@ -8,7 +8,7 @@ from setuptools import setup
 name = "imapfetch"
 
 # package version and commit hash
-version = "0.1.0"
+version = "0.2.0"
 commit = "$Format:%h$"
 
 # try to get the most specific version possible
