@@ -1,2 +1,9 @@
 archive/
 __pycache__/
+build/
+dist/
+pkg/
+*.egg-info/
+*.apk
+*.deb
+*.rpm

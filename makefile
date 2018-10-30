@@ -27,8 +27,7 @@ $(DESTDIR)/usr/share/doc/imapfetch/README.md : README.md
 FORMATS = rpm deb apk
 
 # package version
-VERSION := 0.2.0-$Format:%h$
-VERSION := $(shell [[ $(VERSION) = *-ormat:* ]] && git describe --always || echo $(VERSION))
+VERSION := $(shell sh version.sh describe | sed s/-/./ )
 
 .PHONY: fpm
 fpm : $(FORMATS)
@@ -46,6 +45,6 @@ $(FORMATS) : install
 
 FPM_IMAGE := registry.rz.semjonov.de/docker/fpm-builder:latest
 
-.PHONY: docker-fpm
-docker-fpm :
-	docker run --rm -v $$PWD:/build $(FPM_IMAGE) make fpm
+.PHONY: docker-%
+docker-% :
+	docker run --rm -v $$PWD:/build $(FPM_IMAGE) make $*

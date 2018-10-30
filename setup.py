@@ -1,24 +1,14 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
-from os.path import isdir
-from subprocess import check_output as cmd
+from subprocess import check_output
+from shlex import split
+cmd = lambda s: check_output(split(s)).strip().decode()
+
 from setuptools import setup
 
-# package name
+# package metadata
 name = "imapfetch"
-
-# package version and commit hash
-version = "0.2.0"
-commit = "$Format:%h$"
-
-# try to get the most specific version possible
-if "Format:" not in commit:
-    version = version + "-" + commit
-
-if isdir(".git"):
-    version = cmd(["git", "describe", "--always", "--long", "--dirty"]).strip().decode()
-
-# author information
+version = cmd('sh ./version.sh describe')
 author = "Anton Semjonov"
 email = "anton@semjonov.de"
 github = f"https://github.com/ansemjo/{name}"
