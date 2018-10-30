@@ -8,3 +8,5 @@ src/
 *.apk
 *.deb
 *.rpm
+*.pkg.tar.*
+*-git/
