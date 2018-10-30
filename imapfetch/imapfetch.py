@@ -133,17 +133,32 @@ class Archive:
     def __contains__(self, message):
         return self.digest(message) in self.index
 
-    # save a message in mailbox
-    def store(self, message, folder):
+    # return a mailbox instance
+    def __mailbox(self, folder):
         box = EmlMaildir(join(folder, self.dir), create=True)
         if nt:
             box.colon = "!"
+        return box
+
+    # save a message in mailbox
+    def store(self, message, folder):
+        box = self.__mailbox(folder)
         msg = mailbox.MaildirMessage(message)
-        msg.set_subdir("cur")
         key = box.add(msg)
         self.index[self.digest(message)] = folder + "/" + key
         self.log(INFO, f"stored {key}")
         return key
+
+    # move all existing messages in mailbox to cur subdir
+    def move_old(self, folder):
+        box = self.__mailbox(folder)
+        for key in box.iterkeys():
+            with box.get_file(key) as msgfile:
+                if f"/new/{key}" in msgfile._file.name:
+                    self.log(VERBOSE, f"moving message {key} to cur")
+                    msg = box.get(key)
+                    msg.set_subdir("cur")
+                    box[key] = msg
 
     # store uid per folder
     def setuid(self, folder, uid):
@@ -244,6 +259,7 @@ def imapfetch():
 
                 sectlog(INFO, f"processing folder {folder}")
                 server.cd(folder)
+                archive.move_old(folder)
 
                 # retrieve the highest known uid for incremental runs
                 uidkey = section + "/" + folder
