@@ -21,8 +21,8 @@ source=("$pkgname::git+https://github.com/ansemjo/imapfetch.git")
 sha256sums=('SKIP')
 
 pkgver() {
-  cd "$srcdir"
-  printf "%s" "$(git describe --long | sed 's/\([^-]*-\)g/r\1/;s/-/./g')"
+  cd "$pkgname"
+  sh ./version.sh describe | sed s/-/./
 
 }
 
