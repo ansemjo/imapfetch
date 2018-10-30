@@ -32,7 +32,7 @@ PKGURL      := https://github.com/ansemjo/$(PKGNAME)
 PKGFORMATS = rpm deb apk
 
 # how to execute fpm
-FPM = podman run --rm --net none -v $$PWD:/build -w /build docker.io/tenzer/fpm
+FPM = podman run --rm --net none -v $$PWD:/build -w /build ansemjo/fpm:alpine
 
 # build a package
 .PHONY: package-%
