@@ -44,7 +44,7 @@ class Mailserver:
 
     # open connection to server, pass imaplib.IMAP4 if you don't want TLS
     def __init__(self, server, username, password, logger=None, IMAP=imaplib.IMAP4_SSL):
-        self.log = logger.getChild('mailserver').log if logger is not None else l('mailserver').log
+        self.log = logger.getChild("mailserver").log if logger is not None else l("mailserver").log
         self.log(VERBOSE, f"connect to {server} as {username}")
         self.connection = IMAP(server)
         self.connection.login(username, password)
@@ -88,6 +88,7 @@ class Mailserver:
             offset += chunksize
             chunksize = nextchunk
 
+
 # EmlMaildir subclasses mailbox.Maildir to change generation of new filenames
 class EmlMaildir(mailbox.Maildir):
 
@@ -96,7 +97,7 @@ class EmlMaildir(mailbox.Maildir):
         now = time.time()
         rand = binascii.hexlify(os.urandom(4)).decode()
         uniq = f"{now:.8f}.{rand}.eml"
-        path = os.path.join(self._path, 'tmp', uniq)
+        path = os.path.join(self._path, "tmp", uniq)
         try:
             os.stat(path)
         except FileNotFoundError:
@@ -104,14 +105,15 @@ class EmlMaildir(mailbox.Maildir):
                 return mailbox._create_carefully(path)
             except FileExistsError:
                 pass
-        raise mailbox.ExternalClashError(f'name clash prevented file creation: {path}')
+        raise mailbox.ExternalClashError(f"name clash prevented file creation: {path}")
+
 
 # Archive is a maildir-based email storage for local on-disk archival.
 class Archive:
 
     # open a new archive
     def __init__(self, path, logger=None):
-        self.log = logger.getChild('archive').log if logger is not None else l('archive').log
+        self.log = logger.getChild("archive").log if logger is not None else l("archive").log
         self.dir = path = join(path)
         self.log(VERBOSE, f"open archive in {path}")
         os.makedirs(path, exist_ok=True)
@@ -135,11 +137,10 @@ class Archive:
     def store(self, message, folder):
         box = EmlMaildir(join(folder, self.dir), create=True)
         if nt:
-            box.colon = '!'
-        key = box.add(message)
-        msg = box.get_message(key)
+            box.colon = "!"
+        msg = mailbox.MaildirMessage(message)
         msg.set_subdir("cur")
-        box[key] = msg
+        key = box.add(msg)
         self.index[self.digest(message)] = folder + "/" + key
         self.log(INFO, f"stored {key}")
         return key
@@ -196,7 +197,8 @@ def imapfetch():
     # initialise logging level and format
     clamp = lambda v, l, u: v if v > l else l if v < u else u
     logging.basicConfig(
-        level=clamp(20 - 5 * args.verbose, 10, 20), format=f"[%(levelname){7 if nt else 18}s] %(name)s: %(message)s"
+        level=clamp(20 - 5 * args.verbose, 10, 20),
+        format=f"[%(levelname){7 if nt else 18}s] %(name)s: %(message)s",
     )
     log.log(DEBUG, args)
 
