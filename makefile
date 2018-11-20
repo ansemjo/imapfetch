@@ -42,4 +42,17 @@ package-% : install
 		--maintainer $(PKGAUTHOR) --license $(PKGLICENSE) --url $(PKGURL)
 
 # build all package formats with fpm
+.PHONY: packages
 packages : $(addprefix package-,$(PKGFORMATS))
+
+# container runtime
+CONTAINER = podman
+IMAGENAME = ansemjo/$(PKGNAME)
+
+# build and tag container
+.PHONY: container
+container:
+	$(CONTAINER) build \
+		-t $(IMAGENAME):latest \
+		-t $(IMAGENAME):$(PKGVERSION) \
+		.
