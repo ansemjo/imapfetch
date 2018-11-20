@@ -108,8 +108,6 @@ decently fast for example.
 Make sure you run a decently modern Python 3 (anything newer than `3.5` _should_ work, development
 was done on `3.7`).
 
-TODO: `deb`, `rpm`
-
 ### PIP
 
 Install the package via `pip` by running:
@@ -125,6 +123,28 @@ On Arch Linux install `imapfetch` with an AUR helper:
 Or use the `PKGBUILD` in `master` to build `imapfetch-git` locally:
 
     makepkg -i
+
+### RPM, DEB, APK
+
+Other packages can be built with [ansemjo/fpm](https://hub.docker.com/r/ansemjo/fpm/) using the
+`makefile` or downloaded from the [releases page](https://github.com/ansemjo/imapfetch/releases).
+They can then be installed locally with `yum`/`dnf`/`dpkg` etc.
+
+    make packages
+
+## CONTAINER
+
+The script can also be scheduled to run regularly with cron inside a container with
+[ansemjo/imapfetch](https://hub.docker.com/r/ansemjo/imapfetch/). Download or build the image with
+the provided `Dockerfile`, then run the container with `docker` or `podman`:
+
+    podman run -d \
+      -v ~/.config/imapfetch.cfg:/config \
+      -v ~/Documents/Email-Archive:/archive \
+      ansemjo/imapfetch
+
+Mount your configuration file and the root directory of your configured archives in the container as
+seen above.
 
 ## LICENSE
 
