@@ -29,3 +29,6 @@ set spoolfile="+INBOX"
 mailboxes `find -type d -name cur -printf "+'%h' "`
 macro index c "<change-folder>?<toggle-mailboxes>" "open a different folder"
 macro pager c "<change-folder>?<toggle-mailboxes>" "open a different folder"
+
+# open mailbox selection on launch
+push 'c'
