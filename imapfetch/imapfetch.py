@@ -135,6 +135,7 @@ class Archive:
 
     # return a mailbox instance
     def __mailbox(self, folder):
+        folder = folder.replace("/", ".")
         box = EmlMaildir(join(folder, self.dir), create=True)
         if nt:
             box.colon = "!"
