@@ -25,6 +25,10 @@ set folder="./"
 set mbox="+INBOX"
 set spoolfile="+INBOX"
 
+# cache headers for better performance in large maildirs
+folder-hook . 'set read_inc=100'
+set header_cache="header_cache"
+
 # dynamically build list of maildir inboxes
 mailboxes `find -type d -name cur -printf "+'%h' "`
 macro index c "<change-folder>?<toggle-mailboxes>" "open a different folder"
