@@ -108,6 +108,10 @@ decently fast for example.
 Make sure you run a decently modern Python 3 (anything newer than `3.5` _should_ work, development
 was done on `3.7`).
 
+**Note:** When running on Python 3.5 (e.g. on Debian 9 "stretch") you need to install
+[pyblake2](https://pypi.org/project/pyblake2/) because the `hashlib` does not include `blake2b` in
+3.5 yet.
+
 ### PIP
 
 Install the package via `pip` by running:

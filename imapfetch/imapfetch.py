@@ -6,7 +6,6 @@
 import imaplib
 import mailbox
 import logging
-import hashlib
 import configparser
 import time
 import binascii
@@ -14,6 +13,12 @@ import dbm
 import email
 import os
 import re
+
+# import hashlib from library or pyblake2 package
+try:
+  from hashlib import blake2b
+except ImportError:
+  from pyblake2 import blake2b
 
 # system is windows
 nt = os.name == "nt"
@@ -29,7 +34,7 @@ log = logging.getLogger("imapfetch")
 l = lambda n: log.getChild(n)
 
 # cryptographic hash for indexing purposes
-Blake2b = lambda b: hashlib.blake2b(b, digest_size=32).digest()
+Blake2b = lambda b: blake2b(b, digest_size=32).digest()
 
 # join path to absolute and expand ~ home
 join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
