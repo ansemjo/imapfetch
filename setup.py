@@ -12,7 +12,7 @@ name = "imapfetch"
 version = check_output(['sh', 'version.sh', 'version']).strip().decode()
 author = "Anton Semjonov"
 email = "anton@semjonov.de"
-github = f"https://github.com/ansemjo/{name}"
+github = "https://github.com/ansemjo/{}".format(name)
 
 setup(
     name=name,
@@ -21,5 +21,5 @@ setup(
     author_email=email,
     url=github,
     packages=[name],
-    entry_points={"console_scripts": [f"{name} = {name}.{name}:{name}"]},
+    entry_points={"console_scripts": ["{0} = {0}.{0}:{0}".format(name)]},
 )
