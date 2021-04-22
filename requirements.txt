@@ -1,0 +1,2 @@
+IMAPClient==2.2.0
+six==1.15.0

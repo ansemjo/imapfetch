@@ -3,7 +3,9 @@
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
-import imaplib
+import imapclient
+import sqlite3
+
 import mailbox
 import logging
 import configparser
@@ -20,21 +22,12 @@ try:
 except ImportError:
   from pyblake2 import blake2b
 
-# system is windows
-nt = os.name == "nt"
-
-# colorful logging levels (with added VERBOSE intermediate)
-INFO, VERBOSE, DEBUG = logging.INFO, 15, logging.DEBUG
-logging.addLevelName(INFO, "\033[34;1mINFO\033[0m" if not nt else "INFO")
-logging.addLevelName(VERBOSE, "\033[33;1mVERBOSE\033[0m" if not nt else "VERBOSE")
-logging.addLevelName(DEBUG, "\033[35;1mDEBUG\033[0m" if not nt else "DEBUG")
-
 # shorthand to get a named logger
-log = logging.getLogger("imapfetch")
+log = logging.getLogger()
 l = lambda n: log.getChild(n)
 
 # cryptographic hash for indexing purposes
-Blake2b = lambda b: blake2b(b, digest_size=32).digest()
+msghash = lambda b: blake2b(b, digest_size=32).digest()
 
 # join path to absolute and expand ~ home
 join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
@@ -42,56 +35,73 @@ join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser
 # remove quotes around folder name
 unquote = lambda f: re.sub(r'"(.*)"', r"\1", f)
 
+
+
 # Mailserver is a connection helper to an IMAP4 server.
 #! Since most IMAP operations are performed on the currently selected folder
-#! this is absolutely not safe for concurrent use. Weird things will happen.
+#! this is absolutely not safe for concurrent use. Weird things *will* happen.
 class Mailserver:
 
-    # open connection to server, pass imaplib.IMAP4 if you don't want TLS
-    def __init__(self, server, username, password, logger=None, IMAP=imaplib.IMAP4_SSL):
-        self.log = logger.getChild("mailserver").log if logger is not None else l("mailserver").log
-        self.log(VERBOSE, "connect to {} as {}".format(server, username))
-        self.connection = IMAP(server)
-        self.connection.login(username, password)
+    def __init__(self, host, username, password, logger=None):
+        self.log = logger or logging.getLogger("mailserver/{}".format(host))
+        self.log.info("connecting to {}".format(host))
+        self.client = imapclient.IMAPClient(host=host, use_uid=True, ssl=True)
+        self.log.info("logging in as {}".format(username))
+        self.client.login(username, password)
+        
+    # stubs for use as context manager
+    def __enter__(self):
+        return self
+    def __exit__(self):
+        self.client.logout()
 
     # list available folders
-    def ls(self):
-        folders = self.connection.list()[1]
-        return (re.sub(r"^\([^)]+\)\s\".\"\s", "", f.decode()) for f in folders)
+    def ls(self, directory="", pattern="*"):
+        return [f[2] for f in self.client.list_folders(directory, pattern)]
 
-    # "change directory", readonly
+    # select a folder, always readonly
     def cd(self, folder):
-        self.connection.select(folder, readonly=True)
+        return self.client.select_folder(folder, readonly=True)
 
-    # get new mail uids in current folder, starting with uidstart
-    # https://blog.yadutaf.fr/2013/04/12/fetching-all-messages-since-last-check-with-python-imap/
-    def mails(self, uidstart=1):
-        # search for and iterate over message uids
-        uids = self.connection.uid("search", None, "UID {}:*".format(uidstart))[1]
-        for uid in uids[0].split():
-            if int(uid) >= uidstart:
-                yield uid
+    # get new mail uids in current folder, starting with uid start
+    def mails(self, start=1):
+        return self.client.search("UID {}:*". format(start))
 
-    # chunk sizes for partial fetches
-    # 64 kB should be enough to fetch all possible headers and small messages in one go
-    FIRSTCHUNK = 64 * 1024
-    # for any larger messages use 1 MB chunks
-    NEXTCHUNK = 1024 * 1024
+    # chunk sizes for partial fetches, first flight and remaining chunks
+    # a sufficiently large firstflight chunk can fetch messages in one go
+    FIRSTFLIGHT =      64*1024 # 64 KB
+    NEXTCHUNKS  = 10*1024*1024 # 10 MB
 
-    # partial generator for a single mail, for use with next() or for..in.. statements
-    def partials(self, uid, firstchunk=FIRSTCHUNK, nextchunk=NEXTCHUNK):
-        offset = 0
-        chunksize = firstchunk
-        while True:
-            # partial fetch using BODY[]<o.c> syntax
-            self.log(DEBUG, "fetch {}: offset={} size={}".format(int(uid), offset, chunksize))
-            wrap, data = self.connection.uid("fetch", uid, "BODY[]<{}.{}>".format(offset, chunksize))[1][0]
-            yield data
-            # check if the chunksize was smaller than requested --> assume no more data
-            if int(re.sub(r".*BODY\[\].* {(\d+)}$", r"\1", wrap.decode())) < chunksize:
-                return
-            offset += chunksize
-            chunksize = nextchunk
+    # commonly useful data selectors for fetch
+    # https://tools.ietf.org/html/rfc3501#section-6.4.5
+    SIZE, HEADER, FULL = b"RFC822.SIZE", b"BODY[HEADER]", b"BODY[]"
+    TEXTF, TEXT = b"BODY[TEXT]<%d.%d>", b"BODY[TEXT]<%d>"
+
+    # thin wrapper on imapclient's fetch for debug logging
+    def fetch(self, uid, data, modifiers=None):
+        print(f"debug: FETCH {uid} [{data}]") # TODO: logger
+        return self.client.fetch(uid, data, modifiers)[uid]
+
+    # retrieve a specific message by uid; return header and body generator
+    def message(self, uid, firstflight=FIRSTFLIGHT, chunk=NEXTCHUNKS):
+
+        # fetch message header, size and "firstflight" chunk
+        msg = self.fetch(uid, [self.SIZE, self.HEADER, self.TEXTF % (0, firstflight)])
+        size, header, text = msg[self.SIZE], msg[self.HEADER], msg[self.TEXT % (0)]
+
+        # function to dynamically fetch and yield message parts as necessary
+        def generator():
+            nonlocal text
+            pos = len(text)
+            yield header + text
+            while size > (len(header) + pos):
+                print(f"fetch next partial from <{pos}.{chunk}>") # TODO: logger
+                part = self.fetch(uid, [self.TEXTF % (pos, chunk)])[self.TEXT % (pos)]
+                pos += len(part)
+                yield part
+
+        return header, size, generator
+
 
 
 # EmlMaildir subclasses mailbox.Maildir to change generation of new filenames
@@ -118,9 +128,9 @@ class Archive:
 
     # open a new archive
     def __init__(self, path, logger=None):
-        self.log = logger.getChild("archive").log if logger is not None else l("archive").log
+        self.log = logger.getChild("archive") if logger is not None else l("archive")
         self.dir = path = join(path)
-        self.log(VERBOSE, "open archive in {}".format(path))
+        self.log.info("open archive in {}".format(path))
         os.makedirs(path, exist_ok=True)
         self.index = dbm.open(join("index", path), flag="c")
 
@@ -132,7 +142,7 @@ class Archive:
     def digest(self, message):
         message = email.message_from_bytes(message)
         message.set_payload("")
-        return Blake2b(message.as_bytes())
+        return msghash(message.as_bytes())
 
     # test if a message is already in the archive by hashing the header
     def __contains__(self, message):
@@ -142,7 +152,8 @@ class Archive:
     def __mailbox(self, folder):
         folder = folder.replace("/", ".")
         box = EmlMaildir(join(folder, self.dir), create=True)
-        if nt:
+        if os.name == "nt": # system is windows
+            # TODO: get rid of this by subclassing .add() without info part?
             box.colon = "!"
         return box
 
@@ -152,7 +163,7 @@ class Archive:
         msg = mailbox.MaildirMessage(message)
         key = box.add(msg)
         self.index[self.digest(message)] = folder + "/" + key
-        self.log(INFO, "stored {}".format(key))
+        self.log.warning("stored {}".format(key))
         return key
 
     # move all existing messages in mailbox to cur subdir
@@ -161,7 +172,7 @@ class Archive:
         for key in box.iterkeys():
             with box.get_file(key) as msgfile:
                 if "/new/{}".format(key) in msgfile._file.name:
-                    self.log(VERBOSE, "moving message {} to cur".format(key))
+                    self.log.info("moving message {} to cur".format(key))
                     msg = box.get(key)
                     msg.set_subdir("cur")
                     box[key] = msg
@@ -212,19 +223,17 @@ def imapfetch():
     parser.add_argument("section", help="sections to execute", nargs="*")
     parser.add_argument("--full", "-f", help="do full backups", action="store_true")
     parser.add_argument("--list", "-l", help="only list folders", action="store_true")
-    parser.add_argument("--verbose", "-v", help="increase verbosity", action="count", default=0)
+    parser.add_argument("--verbose", "-v", help="increase logging verbosity", action="count", default=0)
     args = parser.parse_args()
 
-    # initialise logging level and format
-    clamp = lambda v, l, u: v if v > l else l if v < u else u
-    logging.basicConfig(
-        level=clamp(20 - 5 * args.verbose, 10, 20),
-        format="[%(levelname){}s] %(name)s: %(message)s".format(7 if nt else 18),
-    )
-    log.log(DEBUG, args)
+    # configure logging format and verbosity
+    level = [logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG]
+    level = level[min(len(level) - 1, args.verbose)]
+    logging.basicConfig(format="%(name)s: %(message)s", level=level)
+    log.debug(args)
 
     # read configuration
-    log.log(VERBOSE, "read configuration from {}".format(args.config.name))
+    log.info("read configuration from {}".format(args.config.name))
     conf = configparser.ConfigParser()
     conf.read_file(args.config)
 
@@ -233,18 +242,18 @@ def imapfetch():
 
         # skip if sections given and it is not contained
         if len(args.section) >= 1 and section not in args.section:
-            log.log(DEBUG, "section {} skipped".format(section))
+            log.debug("section {} skipped".format(section))
             continue
-        log.log(INFO, "processing section {}".format(section))
-        sectlog = l(section).log
+        log.warning("processing section {}".format(section))
+        sectlog = l(section)
 
         # if --list is given only connect and show folders
         if args.list:
             acc = Account(conf[section])
             serv = Mailserver(acc._server, acc._username, acc._password, logger=l(section))
-            sectlog(VERBOSE, "listing folders:")
+            sectlog.info("listing folders:")
             for f in serv.ls():
-                sectlog(INFO, f)
+                sectlog.warning(f)
             continue
 
         # open account for this section
@@ -258,12 +267,12 @@ def imapfetch():
                     f = unquote(folder)
                     for ex in acc.exclude:
                         if fnmatch.fnmatch(f, ex):
-                            sectlog(VERBOSE, "folder {} excluded due to '{}'".format(f, ex))
+                            sectlog.info("folder {} excluded due to '{}'".format(f, ex))
                             raise ValueError()
                 except ValueError:
                     continue
 
-                sectlog(INFO, "processing folder {}".format(folder))
+                sectlog.warning("processing folder {}".format(folder))
                 server.cd(folder)
                 archive.move_old(folder)
 
@@ -271,16 +280,16 @@ def imapfetch():
                 uidkey = section + "/" + folder
                 if not args.full and acc.incremental:
                     highest = int(archive.getuid(uidkey))
-                    sectlog(DEBUG, "highest saved uid for {} = {}".format(uidkey, highest))
+                    sectlog.debug("highest saved uid for {} = {}".format(uidkey, highest))
                 else:
                     highest = 1
-                    sectlog(VERBOSE, "starting at uid 1")
+                    sectlog.info("starting at uid 1")
 
                 # iterate over all uids >= highest
                 for uid in server.mails(highest):
 
                     # email chunk generator
-                    sectlog(DEBUG, "read email uid {}".format(int(uid)))
+                    sectlog.debug("read email uid {}".format(int(uid)))
                     partials = server.partials(uid)
                     message = b""
 
@@ -290,7 +299,7 @@ def imapfetch():
 
                     # does the mail already exists?
                     if message in archive:
-                        sectlog(VERBOSE, "message {} exists already".format(int(uid)))
+                        sectlog.info("message {} exists already".format(int(uid)))
 
                     else:
 
