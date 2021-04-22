@@ -24,6 +24,7 @@ set mbox_type="Maildir"
 set folder="./"
 set mbox="+INBOX"
 set spoolfile="+INBOX"
+set read_only = yes
 
 # cache headers for better performance in large maildirs
 folder-hook . 'set read_inc=100'
