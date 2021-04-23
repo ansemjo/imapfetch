@@ -85,19 +85,6 @@ class Mailserver:
         return header, size, generator
 
 
-#! MIGRATION NOTES
-# If you're trying to move from a previous version, you'll likely need some
-# manual migrations, specifically re-reading all messages to recreate the index?
-#
-#   - The message.as_bytes() returns a different header than what the IMAP server
-#     returns for fetches of BODY[HEADER]. In my testing, setting the policy as
-#     message.policy = email.policy.HTTP results in identical headers, which is
-#     important to get identical hashes for the index ... I'm not sure yet if
-#     parsing _every_ message through MaildirMessage is a good idea for local
-#     canonicalization? It seems that at least Windows has some problems with
-#     the output format resulting from this step? Certainly, directly writing
-#     the server response for BODY[] to disk is more performant ...
-
 # Maildir subclasses mailbox.Maildir to change storage and filename format
 # partly adapted from https://github.com/python/cpython/blob/master/Lib/mailbox.py
 class Maildir(mailbox.Maildir):
