@@ -4,9 +4,8 @@
 # Licensed under the MIT License
 
 import imapclient
-import sqlite3
-
-import mailbox
+import functools
+import mailbox, email.policy
 import logging
 import configparser
 import time
@@ -22,19 +21,8 @@ try:
 except ImportError:
   from pyblake2 import blake2b
 
-# shorthand to get a named logger
-log = logging.getLogger()
-l = lambda n: log.getChild(n)
-
-# cryptographic hash for indexing purposes
-msghash = lambda b: blake2b(b, digest_size=32).digest()
-
 # join path to absolute and expand ~ home
-join = lambda p, base=".": os.path.abspath(os.path.join(base, os.path.expanduser(p)))
-
-# remove quotes around folder name
-unquote = lambda f: re.sub(r'"(.*)"', r"\1", f)
-
+pjoin = lambda arr: os.path.abspath(os.path.join(*[os.path.expanduser(p) for p in arr]))
 
 
 # Mailserver is a connection helper to an IMAP4 server.
@@ -49,7 +37,7 @@ class Mailserver:
         self.log.info("logging in as {}".format(username))
         self.client.login(username, password)
         
-    # stubs for use as context manager
+    # stubs for use as a context manager
     def __enter__(self):
         return self
     def __exit__(self):
@@ -103,87 +91,119 @@ class Mailserver:
         return header, size, generator
 
 
+#! MIGRATION NOTES
+# If you're trying to move from a previous version, you'll likely need some
+# manual migrations, specifically re-reading all messages to recreate the index?
+#
+#   - The message.as_bytes() returns a different header than what the IMAP server
+#     returns for fetches of BODY[HEADER]. In my testing, setting the policy as
+#     message.policy = email.policy.HTTP results in identical headers, which is
+#     important to get identical hashes for the index ... I'm not sure yet if
+#     parsing _every_ message through MaildirMessage is a good idea for local
+#     canonicalization? It seems that at least Windows has some problems with
+#     the output format resulting from this step? Certainly, directly writing
+#     the server response for BODY[] to disk is more performant ...
 
-# EmlMaildir subclasses mailbox.Maildir to change generation of new filenames
-class EmlMaildir(mailbox.Maildir):
+# Maildir subclasses mailbox.Maildir to change storage and filename format
+# partly adapted from https://github.com/python/cpython/blob/master/Lib/mailbox.py
+class Maildir(mailbox.Maildir):
+    colon = "!" # should never be needed
 
-    # modified from https://github.com/python/cpython/blob/master/Lib/mailbox.py
-    def _create_tmp(self):
-        now = time.time()
-        rand = binascii.hexlify(os.urandom(4)).decode()
-        uniq = "{:.8f}.{}.eml".format(now, rand)
-        path = os.path.join(self._path, "tmp", uniq)
-        try:
-            os.stat(path)
+    # greatly simplified file writer that uses content-addressable
+    # filenames through a digest of the raw message header
+    def add(self, message):
+        if not isinstance(message, Message):
+            raise TypeError("message must be a Message object")
+        # hash header to get content-addressable filename
+        name = message.uniqname()
+        path = os.path.join(self._path, "cur", name)
+        try: os.stat(path)
         except FileNotFoundError:
-            try:
-                return mailbox._create_carefully(path)
-            except FileExistsError:
-                pass
-        raise mailbox.ExternalClashError("name clash prevented file creation: {}".format(path))
+            file = mailbox._create_carefully(path)
+            file.write(message.as_bytes())
+            file.close()
+            return name
+        raise FileExistsError("a message with this header digest exists: {}".format(name))
+
+
+
+# Message is a wrapper around MaildirMessage with necessary properties
+# applied to normalize it and compute stable header digests.
+class Message(mailbox.MaildirMessage):
+    def __init__(self, message):
+        super().__init__(message)
+        self._digest = self._header = None
+        # apply policy to use \r\n and long lines
+        self.policy = email.policy.HTTP
+
+    # return and cache the header in bytes
+    def header(self):
+        if not self._header:
+            message = self.as_bytes()
+            self._header = message[:message.index(b"\r\n\r\n")+4]
+        return self._header
+
+    # return and cache the header digest
+    def digest(self):
+        if not self._digest:
+            self._digest = blake2b(self.header(), digest_size=32).digest()
+        return self._digest
+
+    # return a filename for storage
+    def uniqname(self):
+        return "{}.eml".format(self.digest().hex())
+
 
 
 # Archive is a maildir-based email storage for local on-disk archival.
+# It opens a directory and creates several mailboxes (one per inbox) and
+# a small indexing database within.
 class Archive:
 
     # open a new archive
-    def __init__(self, path, logger=None):
-        self.log = logger.getChild("archive") if logger is not None else l("archive")
-        self.dir = path = join(path)
-        self.log.info("open archive in {}".format(path))
-        os.makedirs(path, exist_ok=True)
-        self.index = dbm.open(join("index", path), flag="c")
+    def __init__(self, path, logger=None, quoting=False):
+        self.log = logger.getChild("archive") if logger is not None else logging.getLogger("archive")
+        self.path = pjoin([path])
+        os.makedirs(self.path, exist_ok=True)
+        self.index = dbm.open(pjoin([self.path, "index"]), flag="c")
+        self.log.info("opened archive in {}".format(self.path))
 
-    # cleanup
-    def close(self):
-        return self.index.close()
+    # stubs for use as a context manager
+    def __enter__(self):
+        return self
+    def __exit__(self):
+        self.index.close()
 
-    # get indexing key by hashing message header
-    def digest(self, message):
-        message = email.message_from_bytes(message)
-        message.set_payload("")
-        return msghash(message.as_bytes())
+    # store highest-seen uid per inbox
+    def lastseen(self, inbox, uid=None):
+        if uid is None: return int(self.index.get("uid/{}".format(inbox), 1))
+        else: self.index["uid/{}".format(inbox)] = str(uid)
 
-    # test if a message is already in the archive by hashing the header
+    # check if a message is already in the archive
     def __contains__(self, message):
-        return self.digest(message) in self.index
+        if not isinstance(message, Message):
+            raise TypeError("message must be a Message object")
+        return message.digest() in self.index
 
-    # return a mailbox instance
-    def __mailbox(self, folder):
+    # return a maildir instance for an inbox folder
+    @functools.lru_cache(maxsize=8)
+    def inbox(self, folder):
         folder = folder.replace("/", ".")
-        box = EmlMaildir(join(folder, self.dir), create=True)
-        if os.name == "nt": # system is windows
-            # TODO: get rid of this by subclassing .add() without info part?
-            box.colon = "!"
-        return box
+        # TODO: add optional urlcomponent quoting
+        return Maildir(pjoin([self.path, folder]), create=True)
 
-    # save a message in mailbox
-    def store(self, message, folder):
-        box = self.__mailbox(folder)
-        msg = mailbox.MaildirMessage(message)
-        key = box.add(msg)
-        self.index[self.digest(message)] = folder + "/" + key
-        self.log.warning("stored {}".format(key))
-        return key
+    # archive a message in mailbox
+    def store(self, folder, message):
+        if not isinstance(message, Message):
+            message = Message(message)
+        if message in self:
+            raise FileExistsError("message already in index")
+        inbox = self.inbox(folder)
+        file = inbox.add(message)
+        self.index[message.digest()] = b""
+        self.log.warning("stored {}".format(file))
+        return message.digest()
 
-    # move all existing messages in mailbox to cur subdir
-    def move_old(self, folder):
-        box = self.__mailbox(folder)
-        for key in box.iterkeys():
-            with box.get_file(key) as msgfile:
-                if "/new/{}".format(key) in msgfile._file.name:
-                    self.log.info("moving message {} to cur".format(key))
-                    msg = box.get(key)
-                    msg.set_subdir("cur")
-                    box[key] = msg
-
-    # store uid per folder
-    def setuid(self, folder, uid):
-        self.index["UID:" + folder] = uid
-
-    # retrieve highest seen uid per folder, default 0
-    def getuid(self, folder):
-        return self.index.get("UID:" + folder, 1)
 
 
 # Account is a configuration helper, parsing a section from a configuration file
@@ -192,7 +212,7 @@ class Account:
     # parse account data from configuration section
     def __init__(self, section, logger=None):
         self.log = logger
-        self._archive = join(section.get("archive"))
+        self._archive = pjoin([section.get("archive")])
         self.incremental = section.getboolean("incremental", True)
         self.exclude = section.get("exclude", "").strip().split("\n")
         self._server = section.get("server")
