@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
+"""Download emails from an IMAP mailserver and store them in a maildir format."""
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
+__version__ = "0.9.0"
+
 import os, sys, dbm, logging, signal, hashlib
-import contextlib, functools, configparser
-import mailbox, email.policy, urllib.parse
+import contextlib, functools, urllib.parse
+import mailbox, email.policy
 import imapclient
 
 # register a signal handler for clean(er) exits
@@ -226,11 +229,9 @@ class Account:
 
 
 # -----------------------------------------------------------------------------------
-def imapfetch():
+def commandline():
 
-    import argparse
-    import fnmatch
-
+    import argparse, configparser, fnmatch
     parser = argparse.ArgumentParser()
     parser.add_argument("config", help="configuration file", type=argparse.FileType("r"))
     parser.add_argument("section", help="sections to execute", nargs="*")
@@ -316,4 +317,4 @@ def imapfetch():
 
 
 if __name__ == "__main__":
-    imapfetch()
+    commandline()
