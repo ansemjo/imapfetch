@@ -3,25 +3,16 @@
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
+import os, sys, dbm, logging, signal, hashlib
+import contextlib, functools, configparser
+import mailbox, email.policy, urllib.parse
 import imapclient
-import contextlib
-import functools
-import mailbox, email.policy
-import logging
-import configparser
-import time
-import binascii
-import dbm
-import email
-import os
-import re
 
-# import hashlib from library or pyblake2 package
-try:
-  from hashlib import blake2b
-except ImportError:
-  from pyblake2 import blake2b
-
+# register a signal handler for clean(er) exits
+def interrupt(sig, frame):
+    print(" interrupt.")
+    sys.exit(0)
+signal.signal(signal.SIGINT, interrupt)
 
 # Mailserver is a connection helper to an IMAP4 server.
 #! Since most IMAP operations are performed on the currently selected folder
@@ -111,11 +102,11 @@ class Maildir(mailbox.Maildir):
 
     # greatly simplified file writer that uses content-addressable
     # filenames through a digest of the raw message header
-    def add(self, message):
+    def add(self, message, uid=0):
         if not isinstance(message, Message):
             raise TypeError("message must be a Message object")
         # hash header to get content-addressable filename
-        name = message.uniqname()
+        name = message.uniqname(uid)
         path = os.path.join(self._path, "cur", name)
         try: os.stat(path)
         except FileNotFoundError:
@@ -136,22 +127,22 @@ class Message(mailbox.MaildirMessage):
         # apply policy to use \r\n and long lines
         self.policy = email.policy.HTTP
 
-    # return and cache the header in bytes
+    # slice and cache the header as bytes
     def header(self):
         if not self._header:
             message = self.as_bytes()
             self._header = message[:message.index(b"\r\n\r\n")+4]
         return self._header
 
-    # return and cache the header digest
+    # compute and cache the header digest
     def digest(self):
         if not self._digest:
-            self._digest = blake2b(self.header(), digest_size=32).digest()
+            self._digest = hashlib.sha224(self.header()).digest()
         return self._digest
 
     # return a filename for storage
-    def uniqname(self):
-        return "{}.eml".format(self.digest().hex())
+    def uniqname(self, uid=0):
+        return "{:010d}-{}.eml".format(uid, self.digest().hex())
 
 
 
@@ -168,6 +159,7 @@ class Archive:
         os.makedirs(self.path, exist_ok=True)
         self.index = dbm.open(os.path.join(self.path, "index"), flag="c")
         self.log.info("opened archive in {}".format(self.path))
+        self.quoting = quoting
 
     # stubs for use as a context manager
     def __enter__(self):
@@ -190,21 +182,22 @@ class Archive:
     # return a maildir instance for an inbox folder
     @functools.lru_cache(maxsize=8)
     def inbox(self, folder):
-        # TODO: add optional urlcomponent quoting
-        # TODO: make "/" replacement configurable?
+        # quote a folder name with urlencode to make it safe(r)
+        if self.quoting:
+            folder = urllib.parse.quote_plus(folder)
         folder = folder.replace("/", ".")
         return Maildir(os.path.join(self.path, folder), create=True)
 
     # archive a message in mailbox
-    def store(self, folder, message):
+    def store(self, folder, message, uid=0):
         if not isinstance(message, Message):
             message = Message(message)
         if message in self:
             raise FileExistsError("message already in index")
         inbox = self.inbox(folder)
-        file = inbox.add(message)
-        self.index[message.digest()] = b""
-        self.log.warning("stored {}".format(file))
+        file = inbox.add(message, uid)
+        self.index[message.digest()] = uid.to_bytes(4, "big")
+        self.log.warning("message uid {} stored in {}".format(uid, file))
         return message.digest()
 
 
@@ -215,23 +208,23 @@ class Account:
     # parse account data from configuration section
     def __init__(self, section, logger=None):
         self.logger = logger
-        self._archive = section.get("archive")
-        self.incremental = section.getboolean("incremental", True)
+        self.path = section.get("archive")
         self.exclude = section.get("exclude", "").strip().split("\n")
-        self._server = section.get("server")
-        self._username = section.get("username")
-        self._password = section.get("password")
+        self.server = section.get("server")
+        self.username = section.get("username")
+        self.password = section.get("password")
+        self.quoting = section.get("quoting", False)
 
     # yield a mailserver connection from credentials
     @contextlib.contextmanager
     def imap(self):
-        with Mailserver(self._server, self._username, self._password, logger=self.logger) as ms:
+        with Mailserver(self.server, self.username, self.password, self.logger) as ms:
             yield ms
 
     # yield an archive instance at path
     @contextlib.contextmanager
     def archive(self):
-        with Archive(self._archive, logger=self.logger) as ar:
+        with Archive(self.path, self.logger, self.quoting) as ar:
             yield ar
 
     # contextmanager wrapping both of the above
@@ -257,6 +250,7 @@ def imapfetch():
     args = parser.parse_args()
 
     # configure logging format and verbosity
+    # TODO: add more level between info and debug again?
     level = [logging.ERROR, logging.WARNING, logging.INFO, logging.DEBUG]
     level = level[min(len(level) - 1, args.verbose)]
     logging.basicConfig(format="%(name)s: %(message)s", level=level)
@@ -307,24 +301,22 @@ def imapfetch():
 
                 # retrieve the highest known uid from index
                 uidkey = "{}/{}".format(section, folder)
-                if not args.full and acc.incremental:
-                    highest = archive.lastseen(uidkey)
-                    sectlog.debug("lastseen uid for {} = {}".format(uidkey, highest))
-                else:
-                    highest = 1
+                highest = archive.lastseen(uidkey)
+                sectlog.debug("lastseen uid for {} = {}".format(uidkey, highest))
+                if args.full:
                     sectlog.info("starting at uid 1")
 
                 # iterate over all uids >= highest
-                for uid in mailserver.mails(highest):
+                for uid in mailserver.mails(1 if args.full else highest):
                     header, size, generator = mailserver.message(uid)
                     
                     # check if the email is stored already
                     if header in archive:
-                        sectlog.info("message {} exists already".format(uid))
+                        sectlog.info("message uid {} stored already".format(uid))
                     else:
                         # otherwise collect full message and store
                         message = b"".join(generator())
-                        archive.store(folder, message)
+                        archive.store(folder, message, uid)
 
                     # store highest seen uid per folder
                     if uid > highest:
