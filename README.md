@@ -3,6 +3,26 @@
 `imapfetch.py` is a relatively straighforward Python script to download all emails from an IMAP4
 server and store them locally in a maildir format, e.g. for backup purposes.
 
+## NEW VERSION
+
+I started rewriting the script on a separate `devel` branch. It is incompatible with the current main
+branch and I am not sure if or how I can add some sort of automated migration. Some notable changes:
+
+* use `imapclient` to have safer communication with server
+* header digest in filename as a sort of content-addressing technique
+* switch to SHA224 digests
+* rewrite logging, simpler and much quieter by default
+
+Due to the digest change alone old indexes created with < 0.2.4 would unfortunately be completely
+incompatible. But I also noticed that my message parsing unintentionally changed the messages
+that were received from the IMAP server before writing to disk .. ever so slightly but this
+also prevents just re-reading all files to rebuild the index.
+
+It is not finished yet but this next version should already be more stable and correct. You
+can currently only install it with `pip`:
+
+    pip install git+https://github.com/ansemjo/imapfetch.git@devel
+
 ## SYNOPSIS
 
 Configure your accounts using the provided configuration [sample](assets/settings.conf.sample) and
