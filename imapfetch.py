@@ -4,7 +4,7 @@
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
-__version__ = "0.9.0"
+__version__ = "1.0.0"
 
 import os, sys, logging, signal, hashlib, sqlite3
 import contextlib, functools, urllib.parse

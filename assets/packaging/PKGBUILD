@@ -1,4 +1,5 @@
-# Maintainer: Anton Semjonov <anton@semjonov.de>
+echo "this pkgbuild is currently outdated!"
+exit 1
 
 pkgname="imapfetch-git"
 _pkgname=(${pkgname%-git})

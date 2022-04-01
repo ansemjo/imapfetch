@@ -1,58 +1,34 @@
-.DEFAULT_GOAL := docker-fpm
+# get the version from the file
+VERSION = $(shell python -c "$$(sed '/^import/,$$ d' imapfetch.py); print(__version__)")
 
-# packaging directory
-DESTDIR = pkg
-BINDIR  = $(DESTDIR)/usr/bin
-DOCDIR  = $(DESTDIR)/usr/share/doc/imapfetch
+# build sdist with flit
+dist/imapfetch-$(VERSION).tar.gz: imapfetch.py pyproject.toml
+	flit build --setup-py
 
-# command to install file
-INSTALL = install -D -T $< $@
+# extract sdist in packaging directory
+pkg/imapfetch-$(VERSION)/: dist/imapfetch-$(VERSION).tar.gz
+	@mkdir -p pkg/
+	tar -xf $< -C pkg/
+	# patch the setup.py to use setuptools
+	#sed -i 's/^from distutils.core/from setuptools/' $@/setup.py
 
-# install files for packaging
-.PHONY: install
-install : \
-	$(BINDIR)/imapfetch \
-	$(DOCDIR)/muttrc \
-	$(DOCDIR)/imapfetch.conf.sample \
-	$(DOCDIR)/README.md
-
-$(BINDIR)/imapfetch : imapfetch/imapfetch.py ;	$(INSTALL) -m 755
-$(DOCDIR)/muttrc : assets/muttrc ;	$(INSTALL) -m 644
-$(DOCDIR)/imapfetch.conf.sample : assets/settings.conf.sample ;	$(INSTALL) -m 644
-$(DOCDIR)/README.md : README.md ;	$(INSTALL) -m 644
-
-# package metadata
-PKGNAME     := imapfetch
-PKGVERSION  := $(shell sh version.sh describe | sed s/-/./ )
-PKGAUTHOR   := 'ansemjo <anton@semjonov.de'
-PKGLICENSE  := MIT
-PKGURL      := https://github.com/ansemjo/$(PKGNAME)
-
-# packaging formats
+# create packages from source dist with fpm
 PKGFORMATS = rpm deb apk
-
-# how to execute fpm
-FPM = podman run --rm --net none -v $$PWD:/build -w /build ansemjo/fpm:alpine
+FPM = docker run --rm -v $$PWD/pkg:/pkg -w /pkg ghcr.io/ansemjo/fpm
+FPMARGS = \
+	--python-install-bin /usr/bin \
+	--python-install-lib /usr/lib/python3/site-packages \
+	--python-bin /usr/bin/python3
 
 # build a package
-.PHONY: package-%
-package-% : install
-	$(FPM) -s dir -t $* -f --chdir $(DESTDIR) \
-		--name $(PKGNAME) --version $(PKGVERSION) \
-		--maintainer $(PKGAUTHOR) --license $(PKGLICENSE) --url $(PKGURL)
+.PHONY: package package/%
+package : $(addprefix package/,$(PKGFORMATS))
+package/% : pkg/imapfetch-$(VERSION)/
+	$(FPM) $(FPMARGS) -s python -t $* -f $(<:pkg/%=%)
 
-# build all package formats with fpm
-.PHONY: packages
-packages : $(addprefix package-,$(PKGFORMATS))
-
-# container runtime
-CONTAINER = podman
-IMAGENAME = ansemjo/$(PKGNAME)
-
-# build and tag container
-.PHONY: container
-container:
-	$(CONTAINER) build \
-		-t $(IMAGENAME):latest \
-		-t $(IMAGENAME):$(PKGVERSION) \
-		.
+# build packages for depended packages too
+.PHONY: depends depends/%
+depends : $(addprefix depends/,$(PKGFORMATS))
+depends/% :
+	$(FPM) $(FPMARGS) -s python -t $* -f IMAPClient
+	$(FPM) $(FPMARGS) -s python -t $* -f six
