@@ -171,6 +171,7 @@ class Archive:
     # check if this archive was created with a previous version
     def __check_oldversion(self):
         if os.path.isfile(os.path.join(self.path, "index")):
+            self.log(INFO, "\"index\" file found in archive directory")
             self.log(ERROR, "archive was created with a previous version")
             raise AssertionError("incompatible archive format")
 
@@ -289,56 +290,68 @@ def commandline():
             sys.exit(1)
 
     # iterate over selected configuration sections
+    errors = { }
     for section in (args.section or conf.sections()):
-        # TODO: try-except each section separately
 
         # create logger
         applog(INFO, "processing section {}".format(section))
         logger = logging.getLogger(section)
         log = logger.log
 
-        # if --list is given only connect and show folders
-        if args.list:
-            with Account(conf[section], logger).imap() as mailserver:
-                log(INFO, "listing folders:")
+        try:
+
+            # if --list is given only connect and show folders
+            if args.list:
+                with Account(conf[section], logger).imap() as mailserver:
+                    log(INFO, "listing folders:")
+                    for folder in mailserver.ls():
+                        log(WARNING, folder)
+                continue
+
+            # otherwise open archive for processing
+            with Account(conf[section], logger).ctx() as (acc, mailserver, archive):
                 for folder in mailserver.ls():
-                    log(WARNING, folder)
-            continue
 
-        # otherwise open archive for processing
-        with Account(conf[section], logger).ctx() as (acc, mailserver, archive):
-            for folder in mailserver.ls():
+                    # test for exclusion matches
+                    def checkskip(rules, folder):
+                        for pattern in rules:
+                            if fnmatch.fnmatch(folder, pattern):
+                                log(VERBOSE, "excluded folder {} due to {!r}".format(folder, pattern))
+                                return True
+                    if checkskip(acc.exclude, folder):
+                        continue
 
-                # test for exclusion matches
-                def checkskip(rules, folder):
-                    for pattern in rules:
-                        if fnmatch.fnmatch(folder, pattern):
-                            log(VERBOSE, "excluded folder {} due to {!r}".format(folder, pattern))
-                            return True
-                if checkskip(acc.exclude, folder):
-                    continue
+                    # send imap command to change directory 
+                    log(INFO, "processing folder {}".format(folder))
+                    mailserver.cd(folder)
 
-                # send imap command to change directory 
-                log(INFO, "processing folder {}".format(folder))
-                mailserver.cd(folder)
+                    # retrieve the highest known uid from index
+                    highest = archive.lastseen(folder)
+                    log(VERBOSE, "lastseen uid for {} = {}".format(folder, highest))
+                    if args.full:
+                        log(INFO, "starting at uid 1")
 
-                # retrieve the highest known uid from index
-                highest = archive.lastseen(folder)
-                log(VERBOSE, "lastseen uid for {} = {}".format(folder, highest))
-                if args.full:
-                    log(INFO, "starting at uid 1")
+                    # iterate over all uids >= highest
+                    for uid in mailserver.mails(1 if args.full else highest):
+                        header, size, generator = mailserver.message(uid)
+                        
+                        # check if the email is stored already
+                        if header in archive:
+                            log(VERBOSE, "message uid {} stored already".format(uid))
+                        else:
+                            # otherwise collect full message and store
+                            message = b"".join(generator())
+                            archive.store(folder, message, uid)
 
-                # iterate over all uids >= highest
-                for uid in mailserver.mails(1 if args.full else highest):
-                    header, size, generator = mailserver.message(uid)
-                    
-                    # check if the email is stored already
-                    if header in archive:
-                        log(VERBOSE, "message uid {} stored already".format(uid))
-                    else:
-                        # otherwise collect full message and store
-                        message = b"".join(generator())
-                        archive.store(folder, message, uid)
+        except Exception as err:
+            errors[section] = err
+            logger.exception(err)
+        
+    if len(errors.keys()):
+        applog(ERROR, "encountered errors!")
+        for section, err in errors.items():
+            applog(ERROR, "{}: {!r}".format(section, err))
+        sys.exit(1)
 
 
 if __name__ == "__main__":
