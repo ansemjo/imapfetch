@@ -263,7 +263,7 @@ class Account:
 def commandline():
 
     import argparse, configparser, fnmatch
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="imapfetch {}".format(__version__))
     parser.add_argument("config", help="configuration file", type=argparse.FileType("r"))
     parser.add_argument("section", help="sections to execute", nargs="*")
     parser.add_argument("--full", "-f", help="do full backups", action="store_true")

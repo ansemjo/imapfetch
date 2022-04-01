@@ -2,7 +2,7 @@ version: 2
 updates:
 
 - package-ecosystem: docker
-  directory: assets/container/
+  directory: assets/
   schedule:
     interval: weekly
 

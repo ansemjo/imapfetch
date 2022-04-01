@@ -7,7 +7,7 @@ FROM python:3.10-alpine
 ENV SCHEDULE="*/15 * * * *"
 
 # copy entrypoint script which execs crond
-COPY assets/container/entrypoint.sh /entrypoint.sh
+COPY assets/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/bin/ash", "/entrypoint.sh"]
 CMD ["cron", "/imapfetch.cfg"]
 
