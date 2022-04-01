@@ -6,7 +6,7 @@
 
 __version__ = "0.9.0"
 
-import os, sys, dbm, logging, signal, hashlib
+import os, sys, logging, signal, hashlib, sqlite3
 import contextlib, functools, urllib.parse
 import mailbox, email.policy
 import imapclient
@@ -149,7 +149,21 @@ class Archive:
         self.log = logger.log if logger else logging.getLogger("archive").log
         self.path = os.path.abspath(os.path.expanduser(path))
         os.makedirs(self.path, exist_ok=True)
-        self.index = dbm.open(os.path.join(self.path, "index"), flag="c")
+        self.db = sqlite3.connect(os.path.join(self.path, "index.db"))
+        self.db.execute("""
+        CREATE TABLE IF NOT EXISTS folders (
+            id          INTEGER     PRIMARY KEY,
+            folder      TEXT        UNIQUE NOT NULL,
+            lastseen    INTEGER
+        )""")
+        self.db.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            digest      BLOB        PRIMARY KEY,
+            folder      INTEGER     NOT NULL,
+            uid         INTEGER     NOT NULL,
+            FOREIGN KEY (folder) REFERENCES folders (id)
+        )""")
+        self.db.commit()
         self.log(INFO, "opened archive in {}".format(self.path))
         self.quoting = quoting
 
@@ -157,19 +171,25 @@ class Archive:
     def __enter__(self):
         return self
     def __exit__(self, exc_type, exc_value, tb):
-        try: self.index.close()
+        try:
+            self.db.commit()
+            self.db.close()
         except: pass
 
-    # store highest-seen uid per inbox
-    def lastseen(self, inbox, uid=None):
-        if uid is None: return int(self.index.get("uid/{}".format(inbox), 1))
-        else: self.index["uid/{}".format(inbox)] = str(uid)
+    # store highest-seen uid per folder
+    def lastseen(self, folder, uid=None):
+        if uid is None: # retrieve uid
+            result = self.db.execute("SELECT lastseen FROM folders WHERE folder = ?", (folder,)).fetchone()
+            return result[0] or 1 if result else 1
+        else: # otherwise store as lastseen
+            self.db.execute("""INSERT INTO folders (folder, lastseen) VALUES (?, ?)
+                ON CONFLICT (folder) DO UPDATE SET lastseen = excluded.lastseen""", (folder, uid))
 
     # check if a message is already in the archive by checking header digest
     def __contains__(self, message):
         if not isinstance(message, Message):
             message = Message(message)
-        return message.digest() in self.index
+        return self.db.execute("SELECT 1 FROM messages WHERE digest = ?", (message.digest(),)).fetchone() != None
 
     # return a maildir instance for an inbox folder
     @functools.lru_cache(maxsize=8)
@@ -189,7 +209,10 @@ class Archive:
             raise FileExistsError("message already in index")
         inbox = self.inbox(folder)
         file = inbox.add(message, uid)
-        self.index[message.digest()] = uid.to_bytes(4, "big")
+        self.lastseen(folder, uid)
+        self.db.execute("""INSERT INTO messages (digest, folder, uid) VALUES
+            (?, (SELECT id FROM folders WHERE folder = ?), ?)""", (message.digest(), folder, uid))
+        self.db.commit()
         self.log(INFO, "message uid {} stored in {}".format(uid, file))
         return message.digest()
 
@@ -260,6 +283,7 @@ def commandline():
 
     # iterate over selected configuration sections
     for section in (args.section or conf.sections()):
+        # TODO: try-except each section separately
 
         # create logger
         applog(INFO, "processing section {}".format(section))
@@ -292,9 +316,8 @@ def commandline():
                 mailserver.cd(folder)
 
                 # retrieve the highest known uid from index
-                uidkey = "{}/{}".format(section, folder)
-                highest = archive.lastseen(uidkey)
-                log(VERBOSE, "lastseen uid for {} = {}".format(uidkey, highest))
+                highest = archive.lastseen(folder)
+                log(VERBOSE, "lastseen uid for {} = {}".format(folder, highest))
                 if args.full:
                     log(INFO, "starting at uid 1")
 
@@ -309,11 +332,6 @@ def commandline():
                         # otherwise collect full message and store
                         message = b"".join(generator())
                         archive.store(folder, message, uid)
-
-                    # store highest seen uid per folder
-                    if uid > highest:
-                        archive.lastseen(uidkey, uid)
-                        highest = uid
 
 
 if __name__ == "__main__":
