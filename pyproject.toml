@@ -5,7 +5,7 @@ build-backend = "flit_core.buildapi"
 [tool.flit.metadata]
 module = "imapfetch"
 author = "Anton Semjonov"
-author-email = "hello@semjonov.de"
+author-email = "py+imapfetch@semjonov.de"
 home-page = "https://github.com/ansemjo/imapfetch"
 description-file = "README.md"
 requires-python = "~=3.5"
