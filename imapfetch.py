@@ -148,6 +148,7 @@ class Archive:
     def __init__(self, path, logger=None, quoting=False):
         self.log = logger.log if logger else logging.getLogger("archive").log
         self.path = os.path.abspath(os.path.expanduser(path))
+        self.__check_oldversion()
         os.makedirs(self.path, exist_ok=True)
         self.db = sqlite3.connect(os.path.join(self.path, "index.db"))
         self.db.execute("""
@@ -166,6 +167,12 @@ class Archive:
         self.db.commit()
         self.log(INFO, "opened archive in {}".format(self.path))
         self.quoting = quoting
+
+    # check if this archive was created with a previous version
+    def __check_oldversion(self):
+        if os.path.isfile(os.path.join(self.path, "index")):
+            self.log(ERROR, "archive was created with a previous version")
+            raise AssertionError("incompatible archive format")
 
     # stubs for use as a context manager
     def __enter__(self):
