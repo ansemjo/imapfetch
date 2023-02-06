@@ -7,6 +7,8 @@ on:
     types: [ assigned, opened, synchronize, reopened ]
   schedule:
     - cron: "32 02 * * 0"
+  workflow_dispatch:
+
 env:
   PLATFORMS: ${{ fromJSON('[ "linux/amd64", "linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6,linux/ppc64le" ]')[ github.event_name != 'pull_request' ] }}
   IMAGENAME: imapfetch
