@@ -1,7 +1,7 @@
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
-FROM python:3.11.2-alpine
+FROM python:3.11.3-alpine
 
 # default cron schedule
 ENV SCHEDULE="*/15 * * * *"
