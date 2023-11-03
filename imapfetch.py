@@ -32,6 +32,12 @@ class Mailserver:
         self.client = imapclient.IMAPClient(host=host, use_uid=True, ssl=True)
         self.log(INFO, "logging in as {}".format(username))
         self.client.login(username, password)
+        if b"Microsoft Exchange" in self.client.welcome:
+          self.exchange = True
+          self.log(INFO, "this is an exchange server")
+
+    # is this an exchange server?
+    exchange = False
         
     # stubs for use as a context manager
     def __enter__(self):
@@ -60,6 +66,7 @@ class Mailserver:
     # commonly useful data selectors for fetch
     # https://tools.ietf.org/html/rfc3501#section-6.4.5
     SIZE, HEADER, FULL = b"RFC822.SIZE", b"BODY[HEADER]", b"BODY[]"
+    # partial fetch and key to retrieve from response dict
     TEXTF, TEXT = b"BODY[TEXT]<%d.%d>", b"BODY[TEXT]<%d>"
 
     # thin wrapper on imapclient's fetch for debug logging
@@ -77,11 +84,20 @@ class Mailserver:
         # function to dynamically fetch and yield message parts as necessary
         def generator():
             nonlocal text
+            # on exchange, the text may be None when the body is empty; this is confusing
+            if self.exchange and text is None:
+                self.log(VERBOSE, "exchange: received an empty message")
+                yield header
+                return
             pos = len(text)
             yield header + text
             while size > (len(header) + pos):
                 self.log(VERBOSE, "next partial: <{}.{}>".format(pos, chunk))
                 part = self.fetch(uid, [self.TEXTF % (pos, chunk)])[self.TEXT % (pos)]
+                # exchange reports unreliable size and may return None body early
+                if self.exchange and (part is None or len(part) == 0):
+                    self.log(VERBOSE, "exchange: premature end of message, wrong size reported")
+                    return
                 pos += len(part)
                 yield part
 
