@@ -357,6 +357,7 @@ def commandline():
                         # check if the email is stored already
                         if header in archive:
                             log(VERBOSE, "message uid {} stored already".format(uid))
+                            archive.lastseen(folder, uid)
                         else:
                             # otherwise collect full message and store
                             message = b"".join(generator())
