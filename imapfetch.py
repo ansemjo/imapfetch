@@ -33,12 +33,15 @@ class Mailserver:
         self.log(INFO, "logging in as {}".format(username))
         self.client.login(username, password)
         if b"Microsoft Exchange" in self.client.welcome:
-          self.exchange = True
+          self.compat = True
           self.log(INFO, "this is an exchange server")
+        if b"OK Gimap ready for requests" in self.client.welcome:
+          self.compat = True
+          self.log(INFO, "this is a Gmail server")
 
-    # is this an exchange server?
-    exchange = False
-        
+    # is this an exchange or gmail server?
+    compat = False
+
     # stubs for use as a context manager
     def __enter__(self):
         return self
@@ -84,9 +87,9 @@ class Mailserver:
         # function to dynamically fetch and yield message parts as necessary
         def generator():
             nonlocal text
-            # on exchange, the text may be None when the body is empty; this is confusing
-            if self.exchange and text is None:
-                self.log(VERBOSE, "exchange: received an empty message")
+            # sometimes, the text may be None when the body is empty; this is confusing
+            if self.compat and text is None:
+                self.log(VERBOSE, "compat: received an empty message")
                 yield header
                 return
             pos = len(text)
@@ -94,9 +97,9 @@ class Mailserver:
             while size > (len(header) + pos):
                 self.log(VERBOSE, "next partial: <{}.{}>".format(pos, chunk))
                 part = self.fetch(uid, [self.TEXTF % (pos, chunk)])[self.TEXT % (pos)]
-                # exchange reports unreliable size and may return None body early
-                if self.exchange and (part is None or len(part) == 0):
-                    self.log(VERBOSE, "exchange: premature end of message, wrong size reported")
+                # exchange+gmail report unreliable size and may return None body early
+                if self.compat and (part is None or len(part) == 0):
+                    self.log(VERBOSE, "compat: premature end of message, wrong size reported")
                     return
                 pos += len(part)
                 yield part
