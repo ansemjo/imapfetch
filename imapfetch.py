@@ -333,7 +333,13 @@ def commandline():
 
                     # test for exclusion matches
                     def checkskip(rules, folder):
+                        if folder == "[Gmail]":
+                            log(VERBOSE, "excluded [Gmail] folder")
+                            return True
                         for pattern in rules:
+                            # common pattern fix for gmail
+                            if pattern.startswith("[Gmail]"):
+                                pattern = "[[]Gmail[]]" + pattern[7:]
                             if fnmatch.fnmatch(folder, pattern):
                                 log(VERBOSE, "excluded folder {} due to {!r}".format(folder, pattern))
                                 return True
