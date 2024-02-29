@@ -10,6 +10,8 @@ import os, sys, logging, signal, hashlib, sqlite3
 import contextlib, functools, urllib.parse
 import mailbox, email.policy
 import imapclient
+import datetime
+
 
 # register a signal handler for clean(er) exits
 def interrupt(sig, frame):
@@ -58,8 +60,20 @@ class Mailserver:
         return self.client.select_folder(folder, readonly=True)
 
     # get new mail uids in current folder, starting with uid start
-    def mails(self, start=1):
-        return self.client.search("UID {}:*". format(start))
+    def mails(self, start=1, start_date=None, end_date=None):
+        # build search criteria
+        criteria = ["UID {}:*".format(start)]
+        if start_date:
+            # IMAP date format is "01-Jan-2000"
+            start_date_str = start_date.strftime('%d-%b-%Y')
+            criteria.append('SINCE {}'.format(start_date_str))
+        if end_date:
+            end_date_str = end_date.strftime('%d-%b-%Y')
+            criteria.append('BEFORE {}'.format(end_date_str))
+
+        # join criteria with space
+        search_criteria = ' '.join(criteria)
+        return self.client.search(search_criteria)
 
     # chunk sizes for partial fetches, first flight and remaining chunks
     # a sufficiently large firstflight chunk can fetch messages in one go
@@ -288,7 +302,13 @@ def commandline():
     parser.add_argument("--full", "-f", help="do full backups", action="store_true")
     parser.add_argument("--list", "-l", help="only list folders", action="store_true")
     parser.add_argument("--verbose", "-v", help="increase logging verbosity", action="count", default=1)
+    parser.add_argument("--start-date", dest="start_date", help="start date for filtering messages (YYYY-MM-DD)")
+    parser.add_argument("--end-date", dest="end_date", help="end date for filtering messages (YYYY-MM-DD)")
     args = parser.parse_args()
+
+    # calculate start_date and end_date if provided
+    start_date = datetime.datetime.strptime(args.start_date, "%Y-%m-%d").date() if args.start_date else None
+    end_date = datetime.datetime.strptime(args.end_date, "%Y-%m-%d").date() if args.end_date else None
 
     # configure logging format and verbosity
     level = [ERROR, WARNING, INFO, VERBOSE, DEBUG]
@@ -357,7 +377,7 @@ def commandline():
                         log(INFO, "starting at uid 1")
 
                     # iterate over all uids >= highest
-                    for uid in mailserver.mails(1 if args.full else highest):
+                    for uid in mailserver.mails(1 if args.full else highest, start_date=start_date, end_date=end_date):
                         header, size, generator = mailserver.message(uid)
                         
                         # check if the email is stored already
