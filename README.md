@@ -29,7 +29,7 @@ Configure your accounts using the provided [configuration sample](assets/setting
 
 Use `--help` to see a list of possible options:
 
-    imapfetch [-h] [--full] [--list] [--verbose] config [section ...]
+    imapfetch [-h] [--full] [--list] [--verbose] [--start-date START_DATE] [--end-date END_DATE] config [section ...]
 
 The configuration file is passed as the first and only required positional argument. Any further positional arguments are section names from the configuration file, which will be run exclusively; for example if you want to archive only a single account at a time.
 
@@ -38,6 +38,10 @@ The configuration file is passed as the first and only required positional argum
 * `--full`: Perform a full backup by starting with UID 1 in every folder; only useful if the server returns inconsistent or not strictly monotonically increasing UIDs. Duplicate mails which are already in the index will not be downloaded either way.
 
 - `--verbose`: Show more verbose logging. Can be passed multiple times.
+
++ `--start-date START_DATE`: Start date for filtering messages (YYYY-MM-DD)
+
+* `--end-date END_DATE`: End date for filtering messages (YYYY-MM-DD)
 
 ## CONFIGURATION
 
