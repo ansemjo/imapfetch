@@ -11,7 +11,7 @@ import contextlib, functools, urllib.parse
 import mailbox, email.policy
 import imapclient
 import datetime
-
+import ssl
 
 # register a signal handler for clean(er) exits
 def interrupt(sig, frame):
@@ -28,12 +28,20 @@ VERBOSE = INFO - 5
 #! this is absolutely not safe for concurrent use. Weird things *will* happen.
 class Mailserver:
 
-    def __init__(self, host, username, password, logger=None):
+    def __init__(self, host, auth_method, username, password, access_token, vendor=None, ssl_nocheck_cert=None, logger=None):
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ssl_context.check_hostname = False
+        if ssl_nocheck_cert: ssl_context.verify_mode = ssl.CERT_NONE
         self.log = logger.log if logger else logging.getLogger("mailserver").log
         self.log(INFO, "connecting to {}".format(host))
-        self.client = imapclient.IMAPClient(host=host, use_uid=True, ssl=True)
+        self.client = imapclient.IMAPClient(host=host, use_uid=True, ssl=True, ssl_context=ssl_context)
         self.log(INFO, "logging in as {}".format(username))
-        self.client.login(username, password)
+
+        if auth_method == 'PASSWORD':
+          self.client.login(username, password)
+        if auth_method == 'OAUTH2' or auth_method == 'XOAUTH2':
+          self.client.oauth2_login(username, access_token, mech=auth_method, vendor=vendor)
+
         if b"Microsoft Exchange" in self.client.welcome:
           self.compat = True
           self.log(INFO, "this is an exchange server")
@@ -268,14 +276,18 @@ class Account:
         self.path = section.get("archive")
         self.exclude = section.get("exclude", "").strip().split("\n")
         self.server = section.get("server")
+        self.auth_method = section.get("auth_method", 'PASSWORD')
         self.username = section.get("username")
         self.password = section.get("password")
+        self.access_token = section.get("access_token", '')
+        self.vendor = section.get("vendor", None)
         self.quoting = section.get("quoting", False)
+        self.ssl_nocheck_cert=section.get("ssl_nocheck_cert", False)
 
     # yield a mailserver connection from credentials
     @contextlib.contextmanager
     def imap(self):
-        with Mailserver(self.server, self.username, self.password, self.logger) as ms:
+        with Mailserver(self.server, self.auth_method, self.username, self.password, self.access_token, self.vendor, self.ssl_nocheck_cert, self.logger) as ms:
             yield ms
 
     # yield an archive instance at path
