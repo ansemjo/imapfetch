@@ -4,7 +4,7 @@
 # Copyright (c) 2018 Anton Semjonov
 # Licensed under the MIT License
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import os, sys, logging, signal, hashlib, sqlite3
 import contextlib, functools, urllib.parse
@@ -12,6 +12,7 @@ import mailbox, email.policy
 import imapclient
 import datetime
 import ssl
+
 
 # register a signal handler for clean(er) exits
 def interrupt(sig, frame):
@@ -28,19 +29,31 @@ VERBOSE = INFO - 5
 #! this is absolutely not safe for concurrent use. Weird things *will* happen.
 class Mailserver:
 
-    def __init__(self, host, auth_method, username, password, access_token, vendor=None, ssl_nocheck_cert=None, logger=None):
-        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        ssl_context.check_hostname = False
-        if ssl_nocheck_cert: ssl_context.verify_mode = ssl.CERT_NONE
+    def __init__(self, host, auth_method, username, password, access_token, oauth_vendor=None, ssl_no_verify=False, logger=None):
         self.log = logger.log if logger else logging.getLogger("mailserver").log
+
+        # optionally prepare ssl_context without verification
+        ssl_context = None
+        if ssl_no_verify:
+          ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+          ssl_context.check_hostname = False
+          ssl_context.verify_mode = ssl.CERT_NONE
+          self.log(WARNING, "ssl verification disabled!")
+
         self.log(INFO, "connecting to {}".format(host))
         self.client = imapclient.IMAPClient(host=host, use_uid=True, ssl=True, ssl_context=ssl_context)
         self.log(INFO, "logging in as {}".format(username))
 
-        if auth_method == 'PASSWORD':
+        # perform selected login method
+        auth_method = str(auth_method).upper()
+        if auth_method == "PASSWORD":
           self.client.login(username, password)
-        if auth_method == 'OAUTH2' or auth_method == 'XOAUTH2':
-          self.client.oauth2_login(username, access_token, mech=auth_method, vendor=vendor)
+        elif auth_method == "OAUTH2" or auth_method == "XOAUTH2":
+          self.client.oauth2_login(username, access_token, mech=auth_method, vendor=oauth_vendor)
+        elif auth_method == "OAUTHBEARER":
+          self.client.oauthbearer_login(username, access_token)
+        else:
+          raise ValueError(f"invalid auth_method: {auth_method}")
 
         if b"Microsoft Exchange" in self.client.welcome:
           self.compat = True
@@ -276,18 +289,19 @@ class Account:
         self.path = section.get("archive")
         self.exclude = section.get("exclude", "").strip().split("\n")
         self.server = section.get("server")
-        self.auth_method = section.get("auth_method", 'PASSWORD')
+        self.auth_method = section.get("auth_method", "PASSWORD")
         self.username = section.get("username")
         self.password = section.get("password")
-        self.access_token = section.get("access_token", '')
-        self.vendor = section.get("vendor", None)
+        self.access_token = section.get("access_token", None)
+        self.oauth_vendor = section.get("oauth_vendor", None)
         self.quoting = section.get("quoting", False)
-        self.ssl_nocheck_cert=section.get("ssl_nocheck_cert", False)
+        self.ssl_no_verify=section.get("ssl_no_verify", False)
 
     # yield a mailserver connection from credentials
     @contextlib.contextmanager
     def imap(self):
-        with Mailserver(self.server, self.auth_method, self.username, self.password, self.access_token, self.vendor, self.ssl_nocheck_cert, self.logger) as ms:
+        with Mailserver(self.server, self.auth_method, self.username, self.password,
+                        self.access_token, self.oauth_vendor, self.ssl_no_verify, self.logger) as ms:
             yield ms
 
     # yield an archive instance at path
