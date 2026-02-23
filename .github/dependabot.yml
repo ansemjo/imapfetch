@@ -4,9 +4,9 @@ updates:
 - package-ecosystem: docker
   directory: assets/
   schedule:
-    interval: weekly
+    interval: monthly
 
 - package-ecosystem: github-actions
   directory: /
   schedule:
-    interval: weekly
+    interval: monthly
